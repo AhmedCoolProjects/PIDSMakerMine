@@ -268,9 +268,9 @@ def main(cfg, model, val_data, test_data, epoch, split, logging=True):
 
     inference_device = cfg.training.inference_device
     if inference_device is not None:
-        if device not in ["cpu", "cuda"]:
-            raise ValueError(f"Invalid inference device {device}")
-        device = torch.device(device)
+        if inference_device not in ["cpu", "cuda", "mps"]:
+            raise ValueError(f"Invalid inference device {inference_device}")
+        device = torch.device(inference_device)
     else:
         device = get_device(cfg)
     use_cuda = device == torch.device("cuda")

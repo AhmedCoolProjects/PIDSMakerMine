@@ -431,10 +431,13 @@ def get_device(cfg):
     if cfg._use_cpu:
         return torch.device("cpu")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if device == torch.device("cpu"):
-        log("Warning: the device is CPU instead of CUDA")
-    return device
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+
+    log("Warning: the device is CPU instead of CUDA")
+    return torch.device("cpu")
 
 
 def get_node_to_path_and_type(cfg):
