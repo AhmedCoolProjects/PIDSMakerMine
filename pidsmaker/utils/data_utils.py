@@ -273,7 +273,7 @@ def extract_msg_from_data(
             msg = torch.cat([x_src, x_dst, fields["edge_type"]], dim=-1)
 
         num_edge_types = get_num_edge_type(cfg)
-        edge_feats = build_edge_feats(fields, msg, edge_features, possible_triplets, num_edge_types)
+        edge_feats = build_edge_feats(fields, msg, edge_features, possible_triplets, num_edge_types, data=g)
 
         edge_type = (
             get_triplet_edge_types(
@@ -286,6 +286,19 @@ def extract_msg_from_data(
             if "edge_type_triplet" in edge_features
             else fields["edge_type"]
         )
+
+        # Build edge_vector if temporal features are available
+        if hasattr(g, "temporal_feats") and "edge_vector" in edge_features:
+            g.edge_vector = torch.cat(
+                [
+                    fields["src_type"],
+                    fields["dst_type"],
+                    fields["src_emb"],
+                    fields["dst_emb"],
+                    g.temporal_feats,
+                ],
+                dim=-1,
+            )
 
         g.x_src = x_src
         g.x_dst = x_dst
@@ -324,7 +337,7 @@ def get_triplet_edge_types(src_type, dst_type, edge_type, possible_triplets, num
     return F.one_hot(matches.long().argmax(dim=1), num_classes=num_edge_types).to(torch.float)
 
 
-def build_edge_feats(fields, msg, edge_features, possible_triplets, num_edge_types):
+def build_edge_feats(fields, msg, edge_features, possible_triplets, num_edge_types, data=None):
     edge_feats = []
     if "edge_type" in edge_features:
         edge_feats.append(fields["edge_type"])
@@ -339,6 +352,8 @@ def build_edge_feats(fields, msg, edge_features, possible_triplets, num_edge_typ
         edge_feats.append(triplets)
     if "msg" in edge_features:
         edge_feats.append(msg)
+    if "edge_vector" in edge_features and data is not None and hasattr(data, "edge_vector"):
+        edge_feats.append(data.edge_vector)
     edge_feats = torch.cat(edge_feats, dim=-1) if len(edge_feats) > 0 else None
     return edge_feats
 

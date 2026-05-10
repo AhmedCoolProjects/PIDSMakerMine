@@ -1,0 +1,15 @@
+# Velox with engineered edge vector features (src_type + dst_type + src_emb + dst_emb + temporal)
+#
+# Adds per-edge temporal features computed during graph construction (normalized timestamp,
+# delta from last src/dst edge, src/dst activity ratio, window density) and concatenates
+# them with node type and embedding info into an edge vector fed to the decoder.
+
+_include_yml: velox
+
+construction:
+  temporal_features:
+    enabled: True
+    num_features: 6
+
+batching:
+  edge_features: edge_type,edge_vector

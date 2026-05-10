@@ -811,6 +811,10 @@ TASK_ARGS = {
             vals=OR(list(DATASET_DEFAULT_CONFIG.keys()) + ["none"]),
             desc="A comma-separated list of datasets on which training is performed. Evaluation is done only the primary dataset run in CLI.",
         ),
+        "temporal_features": {
+            "enabled": Arg(bool, desc="Whether to compute per-edge temporal features during graph construction."),
+            "num_features": Arg(int, desc="Number of temporal features computed per edge."),
+        },
     },
     "transformation": {
         "used_methods": Arg(
@@ -868,10 +872,11 @@ TASK_ARGS = {
         ),
         "edge_features": Arg(
             str,
-            vals=AND(["edge_type", "edge_type_triplet", "msg", "time_encoding", "none"]),
+            vals=AND(["edge_type", "edge_type_triplet", "msg", "time_encoding", "edge_vector", "none"]),
             desc="Edge features to used during GNN training. `edge_type` refers to the system call type, `edge_type_triplet` \
                                 considers a same edge type as a new type if source or destination node types are different, `msg` is the message vector \
-                                used in the TGN, `time_encoding` encodes temporal order of events with their timestamps in the TGN, `none` uses no features.",
+                                used in the TGN, `time_encoding` encodes temporal order of events with their timestamps in the TGN, `edge_vector` uses \
+                                the engineered edge vector (concat of src/dst types, embeddings, and temporal features), `none` uses no features.",
         ),
         "multi_dataset_training": Arg(
             bool, desc="Whether the GNN should be trained on all datasets in `multi_dataset`."

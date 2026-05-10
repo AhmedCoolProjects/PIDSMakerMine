@@ -310,6 +310,7 @@ def decoder_factory(method, objective, cfg, in_dim, out_dim, device, objective_c
             architecture=decoder_cfg.architecture_str,
             dropout=cfg.training.encoder.dropout,
             src_dst_projection_coef=decoder_cfg.src_dst_projection_coef,
+            edge_vector_dim=get_edge_vector_dim(cfg) if objective == "predict_edge_type" else 0,
         )
     elif method == "node_mlp":
         return CustomMLPDecoder(
@@ -744,9 +745,26 @@ def get_edge_dim(cfg, msg_dim):
             if not use_tgn:
                 raise TypeError("Edge feature `time_encoding` is only available if TGN is used.")
             edge_dim += tgn_memory_dim
+        elif edge_feat == "edge_vector":
+            edge_dim += get_edge_vector_dim(cfg)
         elif edge_feat == "none":
             pass
         else:
             raise ValueError(f"Invalid edge feature {edge_feat}")
 
     return edge_dim
+
+
+def get_edge_vector_dim(cfg):
+    if not hasattr(cfg, "batching"):
+        return 0
+    edge_features = list(map(lambda x: x.strip(), cfg.batching.edge_features.split(",")))
+    if "edge_vector" not in edge_features:
+        return 0
+    temporal_cfg = cfg.construction.get("temporal_features", {})
+    if not temporal_cfg.get("enabled", False):
+        return 0
+    emb_dim = cfg.featurization.emb_dim
+    node_type_dim = cfg.dataset.num_node_types
+    num_temporal = temporal_cfg.get("num_features", 6)
+    return node_type_dim * 2 + emb_dim * 2 + num_temporal

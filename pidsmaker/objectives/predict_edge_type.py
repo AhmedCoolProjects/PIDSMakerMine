@@ -11,8 +11,8 @@ class EdgeTypePrediction(nn.Module):
         self.balanced_loss = balanced_loss
         self.edge_type_dim = edge_type_dim
 
-    def forward(self, h_src, h_dst, edge_type, inference, **kwargs):
-        h = self.decoder(h_src=h_src, h_dst=h_dst)
+    def forward(self, h_src, h_dst, edge_type, inference, edge_vector=None, **kwargs):
+        h = self.decoder(h_src=h_src, h_dst=h_dst, edge_vector=edge_vector)
 
         class_weights = (
             compute_class_weights(edge_type, num_classes=self.edge_type_dim)

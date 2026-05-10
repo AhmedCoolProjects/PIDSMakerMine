@@ -5,8 +5,9 @@ Creates time-windowed graph snapshots with node features, edge types, and timest
 Supports attack mimicry generation for data augmentation.
 """
 
+import math
 import os
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 import networkx as nx
@@ -436,14 +437,43 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                     for node, info in node_info.items():
                         graph.add_node(node, node_type=info["node_type"], label=info["label"])
 
+                    # Compute temporal features per edge for the current time window
+                    temporal_cfg = cfg.construction.get("temporal_features", {})
+                    if temporal_cfg.get("enabled", False):
+                        src_counts = Counter(e["src"] for e in edge_list)
+                        dst_counts = Counter(e["dst"] for e in edge_list)
+                        total = len(edge_list)
+                        window_size_ns = max(batch_edges[-1][-2] - start_time, 1)
+                        last_src_time = {}
+                        last_dst_time = {}
+                        for e in edge_list:
+                            t = e["time"]
+                            src, dst = e["src"], e["dst"]
+                            feats = [
+                                (t - start_time) / window_size_ns,
+                                min((t - last_src_time.get(src, t)) / 1e9, 1.0),
+                                min((t - last_dst_time.get(dst, t)) / 1e9, 1.0),
+                                src_counts[src] / total,
+                                dst_counts[dst] / total,
+                                math.log10(total + 1) / 6.0,
+                            ]
+                            e["temporal_feats"] = feats
+                            last_src_time[src] = t
+                            last_dst_time[dst] = t
+
                     for i, edge in enumerate(edge_list):
+                        edge_attrs = {
+                            "event_uuid": edge["event_uuid"],
+                            "time": edge["time"],
+                            "label": edge["label"],
+                            "y": 0,
+                        }
+                        if "temporal_feats" in edge:
+                            edge_attrs["temporal_feats"] = edge["temporal_feats"]
                         graph.add_edge(
                             edge["src"],
                             edge["dst"],
-                            event_uuid=edge["event_uuid"],
-                            time=edge["time"],
-                            label=edge["label"],
-                            y=0,
+                            **edge_attrs,
                         )
 
                         # For unit tests, we only want few edges

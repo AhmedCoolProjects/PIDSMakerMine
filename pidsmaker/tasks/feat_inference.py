@@ -23,11 +23,16 @@ from pidsmaker.utils.utils import (
 
 
 def feat_inference(indexid2vec, etype2oh, ntype2oh, sorted_paths, out_dir, cfg):
+    temporal_cfg = cfg.construction.get("temporal_features", {})
+    has_temporal = temporal_cfg.get("enabled", False)
+    num_temporal = temporal_cfg.get("num_features", 6)
+
     for path in log_tqdm(sorted_paths, desc="Computing edge embeddings"):
         graph = torch.load(path)
         sorted_edges = graph.edges(data=True, keys=True)
 
         src, dst, msg, t, y = [], [], [], [], []
+        temporal_feats_list = []
         for u, v, k, attr in sorted_edges:
             src.append(int(u))
             dst.append(int(v))
@@ -40,6 +45,12 @@ def feat_inference(indexid2vec, etype2oh, ntype2oh, sorted_paths, out_dir, cfg):
                 edge_label = etype2oh[attr["label"]]
             else:
                 edge_label = torch.zeros_like(etype2oh[list(etype2oh.keys())[0]])
+
+            # Temporal features (computed during construction)
+            if has_temporal and "temporal_feats" in attr:
+                temporal_feats_list.append(attr["temporal_feats"])
+            elif has_temporal:
+                temporal_feats_list.append([0.0] * num_temporal)
 
             # Only types
             if indexid2vec is None:
@@ -67,12 +78,17 @@ def feat_inference(indexid2vec, etype2oh, ntype2oh, sorted_paths, out_dir, cfg):
                     )
                 )
 
+        kwargs = {}
+        if has_temporal and len(temporal_feats_list) > 0:
+            kwargs["temporal_feats"] = torch.tensor(temporal_feats_list).to(torch.float)
+
         data = CollatableTemporalData(
             src=torch.tensor(src).to(torch.long),
             dst=torch.tensor(dst).to(torch.long),
             t=torch.tensor(t).to(torch.long),
             msg=torch.vstack(msg).to(torch.float),
             y=torch.tensor(y).to(torch.long),
+            **kwargs,
         )
 
         os.makedirs(out_dir, exist_ok=True)

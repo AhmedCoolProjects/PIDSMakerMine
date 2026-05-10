@@ -147,6 +147,7 @@ class Model(nn.Module):
                     edge_index=batch.edge_index,
                     edge_type=batch.edge_type,
                     y_edge=batch.y,
+                    edge_vector=getattr(batch, "edge_vector", None),
                     inference=inference,
                     x=getattr(batch, "x", None),
                     node_type=getattr(batch, "node_type", None),
