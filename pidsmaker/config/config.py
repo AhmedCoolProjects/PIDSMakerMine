@@ -876,7 +876,11 @@ TASK_ARGS = {
             desc="Edge features to used during GNN training. `edge_type` refers to the system call type, `edge_type_triplet` \
                                 considers a same edge type as a new type if source or destination node types are different, `msg` is the message vector \
                                 used in the TGN, `time_encoding` encodes temporal order of events with their timestamps in the TGN, `edge_vector` uses \
-                                the engineered edge vector (concat of src/dst types, embeddings, and temporal features), `none` uses no features.",
+                                the engineered edge vector (concat of src/dst types and temporal features), `none` uses no features.",
+        ),
+        "edge_vector_proj_dim": Arg(
+            int,
+            desc="Projection dimension for the edge vector in the decoder MLP. Only used when `edge_features` includes `edge_vector`.",
         ),
         "multi_dataset_training": Arg(
             bool, desc="Whether the GNN should be trained on all datasets in `multi_dataset`."

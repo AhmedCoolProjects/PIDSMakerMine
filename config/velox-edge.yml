@@ -1,15 +1,18 @@
-# Velox with engineered edge vector features (src_type + dst_type + src_emb + dst_emb + temporal)
+# Velox with engineered edge vector features (src_type + dst_type + causal temporal)
 #
-# Adds per-edge temporal features computed during graph construction (normalized timestamp,
-# delta from last src/dst edge, src/dst activity ratio, window density) and concatenates
-# them with node type and embedding info into an edge vector fed to the decoder.
+# Adds 8 causal temporal features per edge computed during graph construction:
+# normalized timestamp, log-delta from previous/second-previous/same-pair edges,
+# pair/src frequencies, src type diversity, and normalized previous edge type.
+# Edge vector concats src_type + dst_type + temporal (no redundant embeddings),
+# then projects to low dimension (32) via lin_edge before decoder concatenation.
 
 _include_yml: velox
 
 construction:
   temporal_features:
     enabled: True
-    num_features: 6
+    num_features: 8
 
 batching:
   edge_features: edge_type,edge_vector
+  edge_vector_proj_dim: 32

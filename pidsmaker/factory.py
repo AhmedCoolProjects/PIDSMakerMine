@@ -304,13 +304,15 @@ def decoder_factory(method, objective, cfg, in_dim, out_dim, device, objective_c
     decoder_cfg = getattr(getattr(objective_cfg, objective), method, None)
 
     if method == "edge_mlp":
+        use_edge_vector = objective == "predict_edge_type"
         return CustomEdgeMLP(
             in_dim=in_dim,
             out_dim=out_dim,
             architecture=decoder_cfg.architecture_str,
             dropout=cfg.training.encoder.dropout,
             src_dst_projection_coef=decoder_cfg.src_dst_projection_coef,
-            edge_vector_dim=get_edge_vector_dim(cfg) if objective == "predict_edge_type" else 0,
+            edge_vector_input_dim=get_edge_vector_input_dim(cfg) if use_edge_vector else 0,
+            edge_vector_proj_dim=get_edge_vector_dim(cfg) if use_edge_vector else 0,
         )
     elif method == "node_mlp":
         return CustomMLPDecoder(
@@ -746,7 +748,7 @@ def get_edge_dim(cfg, msg_dim):
                 raise TypeError("Edge feature `time_encoding` is only available if TGN is used.")
             edge_dim += tgn_memory_dim
         elif edge_feat == "edge_vector":
-            edge_dim += get_edge_vector_dim(cfg)
+            edge_dim += get_edge_vector_input_dim(cfg)
         elif edge_feat == "none":
             pass
         else:
@@ -755,7 +757,8 @@ def get_edge_dim(cfg, msg_dim):
     return edge_dim
 
 
-def get_edge_vector_dim(cfg):
+def get_edge_vector_input_dim(cfg):
+    """Raw concatenated dimension of the edge vector (src_type + dst_type + temporal)."""
     if not hasattr(cfg, "batching"):
         return 0
     edge_features = list(map(lambda x: x.strip(), cfg.batching.edge_features.split(",")))
@@ -764,7 +767,20 @@ def get_edge_vector_dim(cfg):
     temporal_cfg = cfg.construction.get("temporal_features", {})
     if not temporal_cfg.get("enabled", False):
         return 0
-    emb_dim = cfg.featurization.emb_dim
     node_type_dim = cfg.dataset.num_node_types
     num_temporal = temporal_cfg.get("num_features", 6)
-    return node_type_dim * 2 + emb_dim * 2 + num_temporal
+    return node_type_dim * 2 + num_temporal
+
+
+def get_edge_vector_dim(cfg):
+    """Projection dimension of the edge vector added to decoder MLP (0 if disabled)."""
+    if not hasattr(cfg, "batching"):
+        return 0
+    edge_features = list(map(lambda x: x.strip(), cfg.batching.edge_features.split(",")))
+    if "edge_vector" not in edge_features:
+        return 0
+    temporal_cfg = cfg.construction.get("temporal_features", {})
+    if not temporal_cfg.get("enabled", False):
+        return 0
+    proj_dim = getattr(cfg.batching, "edge_vector_proj_dim", None)
+    return proj_dim if isinstance(proj_dim, int) else 32

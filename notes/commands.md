@@ -12,6 +12,8 @@ python pidsmaker/main.py velox CLEARSCOPE_E3 --wandb --database_host localhost -
 python pidsmaker/main.py velox CADETS_E3 --wandb --database_host localhost --artifact_dir ./artifacts --training.encoder.dropout=0.3 --training.lr=0.0001 --training.node_hid_dim=256 --training.node_out_dim=256 --training.num_epochs=12 --featurization.emb_dim=256 --project=PIDSHyp --exp=velox_ca_e3
 ```
 
+python pidsmaker/main.py velox-edge CADETS_E3 --wandb --database_host localhost --artifact_dir ./artifacts --training.encoder.dropout=0.3 --training.lr=0.0001 --training.node_hid_dim=256 --training.node_out_dim=256 --training.num_epochs=12 --featurization.emb_dim=256 --project=PIDSHyp --exp=velox_edge_ca_e3_2
+
 ```bash
 ./run.sh velox CADETS_E3 --database_host localhost --artifact_dir ./artifacts --training.encoder.dropout=0.3 --training.lr=0.0001 --training.node_hid_dim=256 --training.node_out_dim=256 --training.num_epochs=12 --featurization.emb_dim=256 --project=PIDSHyp --exp=velox_ca_e3_runs
 ```

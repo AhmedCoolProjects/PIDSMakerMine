@@ -293,8 +293,6 @@ def extract_msg_from_data(
                 [
                     fields["src_type"],
                     fields["dst_type"],
-                    fields["src_emb"],
-                    fields["dst_emb"],
                     g.temporal_feats,
                 ],
                 dim=-1,

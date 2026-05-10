@@ -437,29 +437,42 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                     for node, info in node_info.items():
                         graph.add_node(node, node_type=info["node_type"], label=info["label"])
 
-                    # Compute temporal features per edge for the current time window
+                    # Compute causal temporal features per edge for the current time window
                     temporal_cfg = cfg.construction.get("temporal_features", {})
                     if temporal_cfg.get("enabled", False):
-                        src_counts = Counter(e["src"] for e in edge_list)
-                        dst_counts = Counter(e["dst"] for e in edge_list)
-                        total = len(edge_list)
+                        edge_list.sort(key=lambda e: e["time"])
                         window_size_ns = max(batch_edges[-1][-2] - start_time, 1)
-                        last_src_time = {}
-                        last_dst_time = {}
-                        for e in edge_list:
+                        max_rel_id = len(rel2id)
+                        last_time = None
+                        second_last_time = None
+                        last_pair_time = {}
+                        pair_count = Counter()
+                        src_count = Counter()
+                        src_uniq_types = defaultdict(set)
+                        prev_op = None
+                        for e_idx, e in enumerate(edge_list):
                             t = e["time"]
                             src, dst = e["src"], e["dst"]
+                            op = e["label"]
+                            normalizer = max(e_idx, 1)
                             feats = [
                                 (t - start_time) / window_size_ns,
-                                min((t - last_src_time.get(src, t)) / 1e9, 1.0),
-                                min((t - last_dst_time.get(dst, t)) / 1e9, 1.0),
-                                src_counts[src] / total,
-                                dst_counts[dst] / total,
-                                math.log10(total + 1) / 6.0,
+                                math.log1p((t - last_time) / 1e9) if last_time is not None else 0.0,
+                                math.log1p((t - second_last_time) / 1e9) if second_last_time is not None else 0.0,
+                                math.log1p((t - last_pair_time.get((src, dst), t)) / 1e9),
+                                pair_count[(src, dst)] / normalizer,
+                                src_count[src] / normalizer,
+                                len(src_uniq_types[src]) / normalizer,
+                                rel2id.get(prev_op, 0) / max_rel_id if prev_op is not None else 0.0,
                             ]
                             e["temporal_feats"] = feats
-                            last_src_time[src] = t
-                            last_dst_time[dst] = t
+                            second_last_time = last_time
+                            last_time = t
+                            last_pair_time[(src, dst)] = t
+                            pair_count[(src, dst)] += 1
+                            src_count[src] += 1
+                            src_uniq_types[src].add(rel2id.get(op, 0))
+                            prev_op = op
 
                     for i, edge in enumerate(edge_list):
                         edge_attrs = {
