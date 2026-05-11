@@ -443,13 +443,12 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                         edge_list.sort(key=lambda e: e["time"])
                         window_size_ns = max(batch_edges[-1][-2] - start_time, 1)
                         last_time = None
-                        second_last_time = None
                         last_pair_time = {}
                         pair_count = Counter()
-                        src_count = Counter()
-                        src_uniq_types = defaultdict(set)
                         type_count = Counter()
                         max_type_count = 0
+                        src_uniq_types = defaultdict(set)
+                        dst_uniq_types = defaultdict(set)
                         for e_idx, e in enumerate(edge_list):
                             t = e["time"]
                             src, dst = e["src"], e["dst"]
@@ -461,23 +460,20 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                             feats = [
                                 (t - start_time) / window_size_ns,
                                 math.log1p((t - last_time) / 1e9) if last_time is not None else 0.0,
-                                math.log1p((t - second_last_time) / 1e9) if second_last_time is not None else 0.0,
                                 math.log1p((t - last_pair_time.get((src, dst), t)) / 1e9),
                                 pair_count[(src, dst)] / normalizer,
-                                src_count[src] / normalizer,
-                                len(src_uniq_types[src]) / normalizer,
                                 type_rarity,
                                 0.0 if (src, dst) in last_pair_time else 1.0,
                                 0.0 if op_id in src_uniq_types[src] else 1.0,
+                                0.0 if op_id in dst_uniq_types[dst] else 1.0,
                             ]
                             e["temporal_feats"] = feats
-                            second_last_time = last_time
                             last_time = t
                             last_pair_time[(src, dst)] = t
                             pair_count[(src, dst)] += 1
-                            src_count[src] += 1
                             type_count[op_id] += 1
                             src_uniq_types[src].add(op_id)
+                            dst_uniq_types[dst].add(op_id)
 
                     for i, edge in enumerate(edge_list):
                         edge_attrs = {

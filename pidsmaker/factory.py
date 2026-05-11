@@ -422,6 +422,7 @@ def objective_factory(cfg, in_dim, graph_reindexer, device, objective_cfg=None):
         elif objective == "predict_edge_type":
             loss_fn = categorical_loss_fn_factory("cross_entropy")
             balanced_loss = objective_cfg.predict_edge_type.balanced_loss
+            edge_loss_lambda = objective_cfg.predict_edge_type.get("edge_loss_lambda", 0.3)
 
             num_edge_types = get_num_edge_type(cfg)
 
@@ -434,6 +435,7 @@ def objective_factory(cfg, in_dim, graph_reindexer, device, objective_cfg=None):
                     loss_fn=loss_fn,
                     balanced_loss=balanced_loss,
                     edge_type_dim=num_edge_types,
+                    edge_loss_lambda=edge_loss_lambda,
                 )
             )
 

@@ -699,6 +699,7 @@ OBJECTIVES_CFG = {
         **DECODERS_CFG,
         "balanced_loss": Arg(bool),
         "use_triplet_types": Arg(bool),
+        "edge_loss_lambda": Arg(float, desc="Weight for the edge-vector loss in parallel decoder (loss = loss_node + edge_loss_lambda * loss_edge)."),
     },
     "predict_node_type": {
         "decoder": Arg(
