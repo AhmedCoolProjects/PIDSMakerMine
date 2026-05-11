@@ -442,19 +442,22 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                     if temporal_cfg.get("enabled", False):
                         edge_list.sort(key=lambda e: e["time"])
                         window_size_ns = max(batch_edges[-1][-2] - start_time, 1)
-                        max_rel_id = len(rel2id)
                         last_time = None
                         second_last_time = None
                         last_pair_time = {}
                         pair_count = Counter()
                         src_count = Counter()
                         src_uniq_types = defaultdict(set)
-                        prev_op = None
+                        type_count = Counter()
+                        max_type_count = 0
                         for e_idx, e in enumerate(edge_list):
                             t = e["time"]
                             src, dst = e["src"], e["dst"]
                             op = e["label"]
+                            op_id = rel2id.get(op, 0)
                             normalizer = max(e_idx, 1)
+                            max_type_count = max(max_type_count, max(type_count.values(), default=0))
+                            type_rarity = 1 - (type_count.get(op_id, 0) / max(max_type_count, 1))
                             feats = [
                                 (t - start_time) / window_size_ns,
                                 math.log1p((t - last_time) / 1e9) if last_time is not None else 0.0,
@@ -463,7 +466,9 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                                 pair_count[(src, dst)] / normalizer,
                                 src_count[src] / normalizer,
                                 len(src_uniq_types[src]) / normalizer,
-                                rel2id.get(prev_op, 0) / max_rel_id if prev_op is not None else 0.0,
+                                type_rarity,
+                                0.0 if (src, dst) in last_pair_time else 1.0,
+                                0.0 if op_id in src_uniq_types[src] else 1.0,
                             ]
                             e["temporal_feats"] = feats
                             second_last_time = last_time
@@ -471,8 +476,8 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                             last_pair_time[(src, dst)] = t
                             pair_count[(src, dst)] += 1
                             src_count[src] += 1
-                            src_uniq_types[src].add(rel2id.get(op, 0))
-                            prev_op = op
+                            type_count[op_id] += 1
+                            src_uniq_types[src].add(op_id)
 
                     for i, edge in enumerate(edge_list):
                         edge_attrs = {
