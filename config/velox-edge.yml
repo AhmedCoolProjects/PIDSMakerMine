@@ -1,21 +1,17 @@
-# Velox with engineered edge vector features + parallel decoder
+# Velox with engineered edge vector features (src_type + dst_type + temporal/volumic/novelty)
 #
-# Edge vector: src_type_onehot + dst_type_onehot + 8 temporal/novelty features
-# Parallel decoder: logits_node (src+dst only) + logits_edge (src+dst+edge_vector)
-# Loss = loss_node + edge_loss_lambda * loss_edge
+# Edge vector: src_type_onehot + dst_type_onehot + 10 features:
+#   temporal (t_norm, log_delta_prev, log_delta_same_pair, log_delta_src_activity)
+#   volumic  (pair_freq, src_unique_dsts, pair_type_count)
+#   novelty  (type_rarity, is_new_pair, is_new_type_for_src)
 
 _include_yml: velox
 
 construction:
   temporal_features:
     enabled: True
-    num_features: 8
+    num_features: 10
 
 batching:
   edge_features: edge_type,edge_vector
   edge_vector_proj_dim: 32
-
-training:
-  decoder:
-    predict_edge_type:
-      edge_loss_lambda: 0.3
