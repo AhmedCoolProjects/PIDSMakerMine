@@ -334,102 +334,39 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                     # log(f"Start create edge fused time window graph for {time_interval}")
 
                     node_info = {}
-                    edge_list = []
-                    if cfg.construction.fuse_edge:
-                        edge_info = {}
-                        for (
-                            src_node,
-                            src_index_id,
-                            operation,
-                            dst_node,
-                            dst_index_id,
-                            event_uuid,
-                            timestamp_rec,
-                            _id,
-                        ) in temp_list:
-                            if src_index_id not in node_info:
-                                node_type, label = indexid2msg[src_index_id]
-                                node_info[src_index_id] = {
-                                    "label": label,
-                                    "node_type": node_type,
-                                }
-                            if dst_index_id not in node_info:
-                                node_type, label = indexid2msg[dst_index_id]
-                                node_info[dst_index_id] = {
-                                    "label": label,
-                                    "node_type": node_type,
-                                }
+                    raw_edges = []
 
-                            if (src_index_id, dst_index_id) not in edge_info:
-                                edge_info[(src_index_id, dst_index_id)] = []
+                    # Step 1: Build raw (unfused) edge list from temp_list
+                    for (
+                        src_node,
+                        src_index_id,
+                        operation,
+                        dst_node,
+                        dst_index_id,
+                        event_uuid,
+                        timestamp_rec,
+                        _id,
+                    ) in temp_list:
+                        if src_index_id not in node_info:
+                            node_type, label = indexid2msg[src_index_id]
+                            node_info[src_index_id] = {
+                                "label": label,
+                                "node_type": node_type,
+                            }
+                        if dst_index_id not in node_info:
+                            node_type, label = indexid2msg[dst_index_id]
+                            node_info[dst_index_id] = {
+                                "label": label,
+                                "node_type": node_type,
+                            }
 
-                            edge_info[(src_index_id, dst_index_id)].append(
-                                (timestamp_rec, operation, event_uuid)
-                            )
-
-                        for (src, dst), data in edge_info.items():
-                            sorted_data = sorted(data, key=lambda x: x[0])
-                            operation_list = [entry[1] for entry in sorted_data]
-
-                            indices = []
-                            current_type = None
-                            current_start_index = None
-
-                            for idx, item in enumerate(operation_list):
-                                if item == current_type:
-                                    continue
-                                else:
-                                    if current_type is not None and current_start_index is not None:
-                                        indices.append(current_start_index)
-                                    current_type = item
-                                    current_start_index = idx
-
-                            if current_type is not None and current_start_index is not None:
-                                indices.append(current_start_index)
-
-                            for k in indices:
-                                edge_list.append(
-                                    {
-                                        "src": src,
-                                        "dst": dst,
-                                        "time": sorted_data[k][0],
-                                        "label": sorted_data[k][1],
-                                        "event_uuid": sorted_data[k][2],
-                                    }
-                                )
-                    else:
-                        for (
-                            src_node,
-                            src_index_id,
-                            operation,
-                            dst_node,
-                            dst_index_id,
-                            event_uuid,
-                            timestamp_rec,
-                            _id,
-                        ) in temp_list:
-                            if src_index_id not in node_info:
-                                node_type, label = indexid2msg[src_index_id]
-                                node_info[src_index_id] = {
-                                    "label": label,
-                                    "node_type": node_type,
-                                }
-                            if dst_index_id not in node_info:
-                                node_type, label = indexid2msg[dst_index_id]
-                                node_info[dst_index_id] = {
-                                    "label": label,
-                                    "node_type": node_type,
-                                }
-
-                            edge_list.append(
-                                {
-                                    "src": src_index_id,
-                                    "dst": dst_index_id,
-                                    "time": timestamp_rec,
-                                    "label": operation,
-                                    "event_uuid": event_uuid,
-                                }
-                            )
+                        raw_edges.append({
+                            "src": src_index_id,
+                            "dst": dst_index_id,
+                            "time": timestamp_rec,
+                            "label": operation,
+                            "event_uuid": event_uuid,
+                        })
 
                     # log(f"Start creating graph for {time_interval}")
                     graph = nx.MultiDiGraph()
@@ -437,10 +374,10 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                     for node, info in node_info.items():
                         graph.add_node(node, node_type=info["node_type"], label=info["label"])
 
-                    # Compute causal temporal features per edge for the current time window
+                    # Step 2: Compute causal temporal features on RAW (unfused) edges
                     temporal_cfg = cfg.construction.get("temporal_features", {})
                     if temporal_cfg.get("enabled", False):
-                        edge_list.sort(key=lambda e: e["time"])
+                        raw_edges.sort(key=lambda e: e["time"])
                         window_size_ns = max(batch_edges[-1][-2] - start_time, 1)
                         last_time = None
                         last_pair_time = {}
@@ -451,7 +388,7 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                         src_uniq_types = defaultdict(set)
                         src_unique_dsts = defaultdict(set)
                         pair_types = defaultdict(set)
-                        for e_idx, e in enumerate(edge_list):
+                        for e_idx, e in enumerate(raw_edges):
                             t = e["time"]
                             src, dst = e["src"], e["dst"]
                             op = e["label"]
@@ -480,6 +417,22 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                             src_uniq_types[src].add(op_id)
                             src_unique_dsts[src].add(dst)
                             pair_types[(src, dst)].add(op_id)
+
+                    # Step 3: Optionally fuse consecutive same-type edges, carry over features
+                    if cfg.construction.fuse_edge:
+                        edge_list = []
+                        edge_groups = defaultdict(list)
+                        for e in raw_edges:
+                            edge_groups[(e["src"], e["dst"])].append(e)
+                        for (src, dst), group in edge_groups.items():
+                            group.sort(key=lambda x: x["time"])
+                            current_type = None
+                            for e in group:
+                                if e["label"] != current_type:
+                                    edge_list.append(e)
+                                    current_type = e["label"]
+                    else:
+                        edge_list = raw_edges
 
                     for i, edge in enumerate(edge_list):
                         edge_attrs = {
