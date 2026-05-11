@@ -142,6 +142,8 @@ def fuse_hyperparameter_metrics(method_to_metrics):
             if all_values and any(len(v) > 0 for v in all_values):
                 mean_metrics[metric] = np.mean(all_values, axis=0)
 
+    if not mean_metrics:
+        return []
     list_of_dict = [
         dict(zip(mean_metrics.keys(), values)) for values in zip(*mean_metrics.values())
     ]
@@ -150,6 +152,8 @@ def fuse_hyperparameter_metrics(method_to_metrics):
 
 def avg_std_metrics(method_to_metrics):
     metrics = fuse_hyperparameter_metrics(method_to_metrics)
+    if not metrics:
+        return {}
 
     result = {}
     metric_keys = metrics[0].keys()
@@ -164,6 +168,9 @@ def avg_std_metrics(method_to_metrics):
 
 def max_metrics(method_to_metrics, metric="adp_score"):
     metrics = method_to_metrics[list(method_to_metrics.keys())[0]]
+    metrics = [m for m in metrics if metric in m and m[metric] is not None]
+    if not metrics:
+        return {}
     max_idx = np.argmax([m[metric] for m in metrics])
 
     result = {}
@@ -178,6 +185,9 @@ def max_metrics(method_to_metrics, metric="adp_score"):
 
 def min_metrics(method_to_metrics, metric="adp_score"):
     metrics = method_to_metrics[list(method_to_metrics.keys())[0]]
+    metrics = [m for m in metrics if metric in m and m[metric] is not None]
+    if not metrics:
+        return {}
     min_idx = np.argmin([m[metric] for m in metrics])
 
     result = {}
@@ -190,6 +200,20 @@ def min_metrics(method_to_metrics, metric="adp_score"):
     return result
 
 
+def best_metric_pick_best_run(method_to_metrics):
+    metrics = method_to_metrics["deep_ensemble"]
+    metrics = [m for m in metrics if "adp_score" in m and m["adp_score"] is not None and "discrimination" in m and m["discrimination"] is not None]
+    if not metrics:
+        return {}
+    adp_scores = np.array([e["adp_score"] for e in metrics])
+    max_adp_mask = adp_scores == adp_scores.max()
+
+    filtered_metrics = [metrics[i] for i in range(len(metrics)) if max_adp_mask[i]]
+    best_run = max(filtered_metrics, key=lambda e: e["discrimination"])
+
+    return best_run
+
+
 def push_best_files_to_wandb(method_to_metrics, cfg):
     if "deep_ensemble" in method_to_metrics:
         best_run = best_metric_pick_best_run(method_to_metrics)
@@ -200,16 +224,7 @@ def push_best_files_to_wandb(method_to_metrics, cfg):
         wandb.log(best_run)  # logs all best metrics and images for easy analysis
 
 
-def best_metric_pick_best_run(method_to_metrics):
-    metrics = method_to_metrics["deep_ensemble"]
-    adp_scores = np.array([e["adp_score"] for e in metrics])
-    max_adp_mask = adp_scores == adp_scores.max()
 
-    # Filter only the elements with max adp_score and get the one with the highest discrimination
-    filtered_metrics = [metrics[i] for i in range(len(metrics)) if max_adp_mask[i]]
-    best_run = max(filtered_metrics, key=lambda e: e["discrimination"])
-
-    return best_run
 
 
 # MC Dropout
