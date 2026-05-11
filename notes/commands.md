@@ -36,6 +36,6 @@ python pidsmaker/main.py velox-edge CADETS_E3 --wandb --database_host localhost 
 ## V7
 
 ```bash title="Version 7"
-./run.sh velox-edge CLEARSCOPE_E3 --training.encoder.dropout=0.3 --training.lr=0.001 --training.node_hid_dim=64 --training.node_out_dim=64 --training.num_epochs=12 --featurization.emb_dim=128 --construction.time_window_size=15.0 --project=PIDSHyp --exp=ve_cs_7 --force_restart construction
+./run.sh velox-edge CLEARSCOPE_E3 --training.encoder.dropout=0.3 --training.lr=0.001 --training.node_hid_dim=64 --training.node_out_dim=64 --training.num_epochs=12 --featurization.emb_dim=128 --construction.time_window_size=15.0 --project=PIDSMINE --exp=ve_cs_1
 ```
 

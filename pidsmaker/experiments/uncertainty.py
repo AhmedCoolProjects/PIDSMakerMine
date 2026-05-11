@@ -134,9 +134,13 @@ def fuse_hyperparameter_metrics(method_to_metrics):
         if include_metric_in_stats(val):
             all_values = []
             for param, list_of_dict in method_to_metrics.items():
-                values = [d[metric] for d in list_of_dict if "precision" in d]
+                values = [
+                    d[metric] for d in list_of_dict
+                    if "precision" in d and d.get(metric) is not None
+                ]
                 all_values.append(values)
-            mean_metrics[metric] = np.mean(all_values, axis=0)
+            if all_values and any(len(v) > 0 for v in all_values):
+                mean_metrics[metric] = np.mean(all_values, axis=0)
 
     list_of_dict = [
         dict(zip(mean_metrics.keys(), values)) for values in zip(*mean_metrics.values())
