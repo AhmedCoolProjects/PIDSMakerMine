@@ -434,8 +434,123 @@ the loss distribution for normal edges while keeping attack edge loss high.
 
 ---
 
-## Next
+## CLEARSCOPE E3 Domain Analysis
 
-Brainstorm approaches to break the tension: widening the loss distribution,
-alternative decoder architectures, threshold calibration methods, or
-per-dataset strategies.
+### Edge Types (DARPA TC)
+
+| ID | Name | Description |
+|----|------|-------------|
+| 1 | EVENT_CONNECT | Network connect |
+| 2 | EVENT_EXECUTE | Process execute/load |
+| 3 | EVENT_OPEN | File open |
+| 4 | EVENT_READ | Read operation |
+| 5 | EVENT_RECVFROM | Receive from socket |
+| 6 | EVENT_RECVMSG | Receive message |
+| 7 | EVENT_SENDMSG | Send message |
+| 8 | EVENT_SENDTO | Send to socket |
+| 9 | EVENT_WRITE | Write operation |
+| 10 | EVENT_CLONE | Clone/fork process |
+
+### Valid (src_type, dst_type) → edge type combinations
+
+| Src→Dst | Allowed edge types |
+|---------|-------------------|
+| subject→subject | READ, WRITE, OPEN, CONNECT, RECVFROM, SENDTO, CLONE, SENDMSG, RECVMSG (9 types) |
+| subject→file | WRITE, CONNECT, SENDMSG, SENDTO, CLONE (5 types) |
+| subject→netflow | WRITE, SENDTO, CONNECT, SENDMSG (4 types) |
+| file→subject | READ, OPEN, RECVFROM, EXECUTE, RECVMSG (5 types) |
+| netflow→subject | OPEN, READ, RECVFROM, RECVMSG (4 types) |
+
+### Attack profile (Firefox Drakon APT)
+
+The browser (subject) is exploited via malicious website → Drakon implant
+downloaded → C2 established. Key behavioral changes in the browser process:
+- Subject→File: WRITE (writing malware binary to disk)
+- File→Subject: EXECUTE (launching the malware)
+- Subject→Netflow: CONNECT/SENDTO/SENDMSG (C2 communication)
+- Subject→Subject: CLONE (forking)
+
+### What makes a good feature for this attack
+
+A feature is useful if:
+1. For **normal** edges: feature correlates with edge type (helps predict it → low loss)
+2. For **attack** edges: feature does NOT match the learned pattern (→ high loss)
+3. The feature does NOT collapse normal-edge loss variance (so threshold stays meaningful)
+
+---
+
+## Feature Design for CLEARSCOPE E3
+
+### Feature Categories
+
+**Category A: Temporal** (when things happen)
+- `t_norm`: temporal position in window
+- `log_delta_prev`: time since any previous edge (global event rate)
+- `log_delta_same_pair`: time since this pair last interacted
+- `log_delta_src_activity`: time since this src last did anything
+
+**Category B: Volumic** (how much / how many)
+- `pair_freq_causal`: edges between this (src,dst) so far
+- `src_freq_causal`: total edges from this src so far
+- `src_unique_dsts / normalizer`: how many unique destinations src talks to
+- `pair_type_count / normalizer`: how many different edge types between this pair
+
+**Category C: Novelty** (what's new)
+- `type_rarity`: how rare this edge type is in the window
+- `is_new_pair`: binary, first time seeing (src,dst)
+- `is_new_type_for_src`: binary, first time using this edge type for src
+- `is_new_type_for_dst`: binary, first time seeing this edge type for dst
+
+**Category D: Structural/Relational** (connections between entities)
+- `pair_dominance = pair_freq / max(src_freq, 1)`: how much of src's activity goes to this dst
+- `dst_exposure = pair_freq / max(dst_freq, 1)`: how much of dst's activity comes from this src
+- `degree_ratio_src = in_degree[src] / max(out_degree[src], 1)`: src's receive/send ratio
+
+### What I think would work best for CLEARSCOPE
+
+V2's success (PRE 0.02326, FP 42) suggests the proven core should be preserved.
+V5's improved ADP (0.333) suggests novelty signals help ranking but need
+moderation. The parallel decoder experiment shows that splitting the signal
+destroys performance.
+
+**Proposed feature set** (10 features, 16 raw dims → 32 proj dim):
+
+| # | Feature | Category | Rationale |
+|---|---------|----------|-----------|
+| 0 | `t_norm` | Temporal | Proven in V2 |
+| 1 | `log_delta_prev` | Temporal | Proven in V2 — captures burstiness |
+| 2 | `log_delta_same_pair` | Temporal | Proven in V2 — pair-level timing |
+| 3 | `log_delta_src_activity` | Temporal | NEW: time since src last emitted ANY edge. Attack makes browser active after idle → high delta → unusual |
+| 4 | `pair_freq_causal` | Volumic | Proven in V2 — how often this pair interacts |
+| 5 | `src_unique_dsts / e_idx` | Volumic | NEW: during attack, browser talks to new files/sockets → unique dsts increase → behavioral shift |
+| 6 | `pair_type_count / e_idx` | Volumic | NEW: during attack, browser may use different edge types on same pair → diversity increases |
+| 7 | `type_rarity` | Novelty | From V5 — but without the over-compression since balanced by other features |
+| 8 | `is_new_pair` | Novelty | From V5 — best novelty signal. If never seen before, likely suspicious |
+| 9 | `is_new_type_for_src` | Novelty | From V5 — captures browser doing something it never did before |
+
+**Not included** (and why):
+- `log_delta_prev2`: redundant with log_delta_prev
+- `src_freq_causal`: weak — in V2 it didn't add much discrimination
+- `src_type_diversity`: normalizes too much, compresses loss
+- `prev_op_norm`: weak signal (just encodes the previous edge type)
+- `is_new_type_for_dst`: too aggressive, already covered by is_new_type_for_src and type_rarity
+- `pair_dominance` / `dst_exposure`: too coupled to other features, may cause multicollinearity
+
+**Decoder**: Single head (no parallel decoder), `lin_edge: Linear(16, 32)`,
+MLP input = 512 + 32 = 544 dims.
+
+### Alternative approaches worth considering
+
+1. **Feature noise**: Add gaussian noise (std=0.05) to temporal features during
+   training to prevent over-reliance. This widens the loss distribution by
+   making features slightly less reliable.
+
+2. **Feature dropout**: Randomly zero out temporal features with p=0.1 during
+   training. Forces the model to be robust and not overly dependent on any
+   single feature.
+
+3. **Lower projection dim**: Proj_dim=24 instead of 32. Less capacity means the
+   model can't memorize temporal patterns as easily → less compression.
+
+4. **Temperature scaling**: In the cross-entropy loss, use a temperature > 1.0
+   to soften the probability distribution → wider loss range → less compression.
