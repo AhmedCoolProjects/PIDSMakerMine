@@ -382,7 +382,6 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                         last_time = None
                         last_pair_time = {}
                         last_src_time = {}
-                        last_src_time = {}
                         pair_count = Counter()
                         type_count = Counter()
                         max_type_count = 0
@@ -402,10 +401,7 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                                 math.log1p((t - last_time) / 1e9) if last_time is not None else 0.0,
                                 math.log1p((t - last_pair_time.get((src, dst), t)) / 1e9),
                                 math.log1p((t - last_src_time.get(src, t)) / 1e9),
-                                math.log1p((t - last_src_time.get(src, t)) / 1e9),
                                 pair_count[(src, dst)] / normalizer,
-                                len(src_unique_dsts[src]) / normalizer,
-                                len(pair_types[(src, dst)]) / normalizer,
                                 len(src_unique_dsts[src]) / normalizer,
                                 len(pair_types[(src, dst)]) / normalizer,
                                 type_rarity,
@@ -414,7 +410,6 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                             ]
                             e["temporal_feats"] = feats
                             last_time = t
-                            last_src_time[src] = t
                             last_src_time[src] = t
                             last_pair_time[(src, dst)] = t
                             pair_count[(src, dst)] += 1
