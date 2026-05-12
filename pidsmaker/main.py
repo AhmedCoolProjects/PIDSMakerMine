@@ -258,6 +258,13 @@ def main(cfg, project=None, exp=None, sweep_id=None, **kwargs):
                         metrics, times = run_pipeline(cfg, method=method, iteration=i)
                         method_to_metrics[method].append({**metrics, **times})
 
+                        if "precision" not in metrics:
+                            log(
+                                f"[@iteration {i}] WARNING: No evaluation results "
+                                "(task likely didn't restart)",
+                                pre_return_line=True,
+                            )
+
                         # We force restart in some methods so we avoid forced restart for other methods
                         cfg._force_restart = ""
                         cfg._is_running_mc_dropout = False

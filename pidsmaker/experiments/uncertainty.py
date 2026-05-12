@@ -8,7 +8,7 @@ import torch.nn as nn
 import wandb
 from torch_geometric.nn import MessagePassing
 
-from pidsmaker.config import update_task_paths_to_restart
+from pidsmaker.config import update_task_paths_to_restart, set_task_paths
 
 
 def update_cfg_for_uncertainty_exp(
@@ -86,6 +86,12 @@ def prepare_for_deep_ensemble(cfg, iteration):
         else:
             raise ValueError(f"Invalid `restart_from` value")
 
+        set_task_paths(cfg)
+        if restart_from == "featurization":
+            clear_files_from_featurization(cfg)
+        elif restart_from == "training":
+            clear_files_from_training(cfg)
+
         subtask_concat_value = None
 
     else:
@@ -160,12 +166,15 @@ def avg_std_metrics(method_to_metrics):
 
 def max_metrics(method_to_metrics, metric="adp_score"):
     metrics = method_to_metrics[list(method_to_metrics.keys())[0]]
-    max_idx = np.argmax([m[metric] for m in metrics])
+    valid = [m for m in metrics if m.get(metric) is not None]
+    if not valid:
+        return {}
+    max_idx = np.argmax([m[metric] for m in valid])
 
     result = {}
-    metric_keys = metrics[0].keys()
+    metric_keys = valid[0].keys()
     for key in metric_keys:
-        value = metrics[max_idx][key]
+        value = valid[max_idx][key]
         if include_metric_in_stats(value):
             result[f"{key}_max"] = value
 
@@ -174,12 +183,15 @@ def max_metrics(method_to_metrics, metric="adp_score"):
 
 def min_metrics(method_to_metrics, metric="adp_score"):
     metrics = method_to_metrics[list(method_to_metrics.keys())[0]]
-    min_idx = np.argmin([m[metric] for m in metrics])
+    valid = [m for m in metrics if m.get(metric) is not None]
+    if not valid:
+        return {}
+    min_idx = np.argmin([m[metric] for m in valid])
 
     result = {}
-    metric_keys = metrics[0].keys()
+    metric_keys = valid[0].keys()
     for key in metric_keys:
-        value = metrics[min_idx][key]
+        value = valid[min_idx][key]
         if include_metric_in_stats(value):
             result[f"{key}_min"] = value
 
@@ -198,11 +210,14 @@ def push_best_files_to_wandb(method_to_metrics, cfg):
 
 def best_metric_pick_best_run(method_to_metrics):
     metrics = method_to_metrics["deep_ensemble"]
-    adp_scores = np.array([e["adp_score"] for e in metrics])
+    valid = [m for m in metrics if m.get("adp_score") is not None and m.get("discrimination") is not None]
+    if not valid:
+        return {}
+    adp_scores = np.array([e["adp_score"] for e in valid])
     max_adp_mask = adp_scores == adp_scores.max()
 
     # Filter only the elements with max adp_score and get the one with the highest discrimination
-    filtered_metrics = [metrics[i] for i in range(len(metrics)) if max_adp_mask[i]]
+    filtered_metrics = [valid[i] for i in range(len(valid)) if max_adp_mask[i]]
     best_run = max(filtered_metrics, key=lambda e: e["discrimination"])
 
     return best_run
