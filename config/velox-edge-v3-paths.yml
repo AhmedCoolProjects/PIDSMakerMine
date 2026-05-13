@@ -1,0 +1,42 @@
+# v3-paths: Revised core + Group C (file path semantics)
+#
+# Not all file accesses are equal. A WRITE to /etc/passwd is not the same
+# as a WRITE to /data/data/com.android.browser/cache/X. Group C injects
+# semantic knowledge about the destination file's location that node
+# embeddings (word2vec/doc2vec) encode only implicitly.
+#
+# New over v3-core:
+#   - dst_path_depth      (depth of dst file path / 10, 0 for non-file nodes)
+#   - is_sensitive_path   (binary: dst path starts with sensitive system prefix)
+#   - src_unique_dirs     (log count of distinct dir prefixes this src has touched)
+#   - is_new_dir_for_src  (binary: first time src accesses this directory prefix)
+#
+# Dataset note: CLEARSCOPE E3 is Android — sensitive prefixes include /system/,
+# /data/system/, /proc/. CADETS E3 is FreeBSD — /etc/, /usr/, /bin/ apply.
+# is_sensitive_path covers both via the union prefix set.
+#
+# Primary question: do file path semantics help, or are node embeddings
+# already encoding this information sufficiently?
+#
+# Exp IDs: ve_v3_paths_cs, ve_v3_paths_ca
+
+_include_yml: velox-edge
+
+construction:
+  temporal_features:
+    enabled: True
+    feature_names:
+      - log_delta_same_pair
+      - log_delta_src_activity
+      - pair_freq_revised
+      - src_unique_dsts_log
+      - type_rarity
+      - is_new_pair
+      - is_new_type_for_src
+      - dst_path_depth
+      - is_sensitive_path
+      - src_unique_dirs
+      - is_new_dir_for_src
+
+batching:
+  edge_vector_proj_dim: 16

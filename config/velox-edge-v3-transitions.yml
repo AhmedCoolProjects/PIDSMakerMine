@@ -1,0 +1,37 @@
+# v3-transitions: Revised core + Group F (op transition sequences)
+#
+# V1 features see each operation in isolation. APT attacks follow recognizable
+# op chains that span multiple events: RECV→WRITE (download-and-stage),
+# OPEN→WRITE (tamper without reading). Group F captures these transitions.
+#
+# New over v3-core:
+#   - prev_op_id_same_pair    (normalized op_id of last op between this pair)
+#   - op_transition_rarity    (how rare is this src's prev→cur op transition globally)
+#   - is_recv_write_pattern   (binary: RECVFROM/RECVMSG then EVENT_WRITE from same src)
+#   - is_open_then_write      (binary: EVENT_OPEN then EVENT_WRITE on same dst without READ)
+#
+# Primary question: do op-sequence features expose APT chains that per-op features miss?
+# Expected to be particularly useful for CADETS (nginx backdoor writes /tmp files).
+#
+# Exp IDs: ve_v3_transitions_cs, ve_v3_transitions_ca
+
+_include_yml: velox-edge
+
+construction:
+  temporal_features:
+    enabled: True
+    feature_names:
+      - log_delta_same_pair
+      - log_delta_src_activity
+      - pair_freq_revised
+      - src_unique_dsts_log
+      - type_rarity
+      - is_new_pair
+      - is_new_type_for_src
+      - prev_op_id_same_pair
+      - op_transition_rarity
+      - is_recv_write_pattern
+      - is_open_then_write
+
+batching:
+  edge_vector_proj_dim: 16

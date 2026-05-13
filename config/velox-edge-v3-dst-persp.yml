@@ -1,0 +1,40 @@
+# v3-dst-persp: Revised core + Group A full (dst-perspective features)
+#
+# V1 features are entirely src-centric. In APT attacks the *destination* is
+# often the indicator: a sensitive file targeted by many processes, or a dst
+# that was dormant and is suddenly re-accessed. Group A adds the symmetric
+# dst-side view.
+#
+# New over v3-core:
+#   - log_delta_dst_activity  (how long since this dst was last accessed by any src)
+#   - dst_unique_srcs_log     (log count of unique srcs that have touched this dst)
+#   - dst_op_rarity           (how rare is this op type on this specific dst)
+#   - is_new_src_for_dst      (binary: first time this src accesses this dst)
+#
+# Note: log_delta_dst_activity and is_new_src_for_dst already existed in the
+# feature-engineering branch; dst_unique_srcs_log and dst_op_rarity are new here.
+#
+# Primary question: does the dst-side perspective add signal beyond src-side V1?
+#
+# Exp IDs: ve_v3_dst_persp_cs, ve_v3_dst_persp_ca
+
+_include_yml: velox-edge
+
+construction:
+  temporal_features:
+    enabled: True
+    feature_names:
+      - log_delta_same_pair
+      - log_delta_src_activity
+      - pair_freq_revised
+      - src_unique_dsts_log
+      - type_rarity
+      - is_new_pair
+      - is_new_type_for_src
+      - log_delta_dst_activity
+      - dst_unique_srcs_log
+      - dst_op_rarity
+      - is_new_src_for_dst
+
+batching:
+  edge_vector_proj_dim: 16

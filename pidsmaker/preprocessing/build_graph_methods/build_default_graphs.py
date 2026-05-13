@@ -179,6 +179,36 @@ def compute_and_save_split2nodes(cfg):
 
 _HEX_CHARS = frozenset("0123456789abcdefABCDEF")
 
+_SENSITIVE_PREFIXES = frozenset([
+    "/etc/", "/dev/", "/sys/", "/proc/", "/bin/", "/sbin/",
+    "/lib/", "/usr/", "/boot/",
+    "/system/", "/data/system/",  # Android (CLEARSCOPE E3)
+])
+
+_NETWORK_OPS = frozenset([
+    "EVENT_SENDTO", "EVENT_SENDMSG", "EVENT_RECVFROM", "EVENT_RECVMSG", "EVENT_CONNECT",
+])
+
+
+def _get_dir_prefix(path: str) -> str:
+    """Return the first two path components as a directory-level key."""
+    if not path:
+        return "/"
+    parts = path.split("/")
+    if len(parts) >= 3:
+        return "/" + parts[1] + "/" + parts[2]
+    elif len(parts) >= 2:
+        return "/" + parts[1]
+    return "/"
+
+
+def _is_sensitive_path_fn(path: str) -> float:
+    """1.0 if path starts with a known sensitive system prefix (Linux or Android)."""
+    for prefix in _SENSITIVE_PREFIXES:
+        if path.startswith(prefix):
+            return 1.0
+    return 0.0
+
 
 def _is_hash_filename(label: str) -> float:
     """1.0 if the last path segment looks like a hex hash (len >= 32, all hex chars).
@@ -447,6 +477,19 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                         last_write_time = {}
                         src_recent_new_pairs = defaultdict(lambda: deque(maxlen=50))
 
+                        # State for v2 semantic groups
+                        max_pair_count_so_far = 0
+                        dst_type_count = defaultdict(Counter)
+                        src_netflow_count = Counter()
+                        src_file_write_count = Counter()
+                        src_total_count = Counter()
+                        dst_types_seen = defaultdict(set)
+                        src_dirs = defaultdict(set)
+                        src_last_op = {}
+                        last_op_same_pair = {}
+                        op_transition_count = Counter()
+                        max_transition_count = 0
+
                         for e_idx, e in enumerate(raw_edges):
                             t = e["time"]
                             src, dst = e["src"], e["dst"]
@@ -461,11 +504,23 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                             type_rarity = 1 - (type_count.get(op_id, 0) / max(max_type_count, 1))
                             is_new_pair_val = 0.0 if (src, dst) in last_pair_time else 1.0
 
+                            # Pre-compute for Group A4 (dst_op_rarity)
+                            _dst_max_tc = max(dst_type_count[dst].values(), default=0)
+                            # Pre-compute for Group F (op transitions)
+                            _prev_op_src = src_last_op.get(src)
+                            _prev_op_pair = last_op_same_pair.get((src, dst))
+                            _transition_key = (_prev_op_src, op)
+
                             all_feat_vals = {
-                                # --- existing 10 features ---
+                                # --- existing 10 features (kept for backward compat) ---
                                 "t_norm": (t - start_time) / window_size_ns,
                                 "log_delta_prev": math.log1p((t - last_time) / 1e9) if last_time is not None else 0.0,
-                                "log_delta_same_pair": math.log1p((t - last_pair_time.get((src, dst), t)) / 1e9),
+                                # sentinel fix: new pairs get max-window gap, not 0
+                                "log_delta_same_pair": (
+                                    math.log1p(window_size_ns / 1e9)
+                                    if (src, dst) not in last_pair_time
+                                    else math.log1p((t - last_pair_time[(src, dst)]) / 1e9)
+                                ),
                                 "log_delta_src_activity": math.log1p((t - last_src_time.get(src, t)) / 1e9),
                                 "pair_freq_causal": pair_count[(src, dst)] / normalizer,
                                 "src_unique_dsts_norm": len(src_unique_dsts[src]) / normalizer,
@@ -473,7 +528,7 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                                 "type_rarity": type_rarity,
                                 "is_new_pair": is_new_pair_val,
                                 "is_new_type_for_src": 0.0 if op_id in src_uniq_types[src] else 1.0,
-                                # --- Group A: binary path/label features ---
+                                # --- existing extended features ---
                                 "is_tmp_dst": 1.0 if "/tmp/" in dst_label else 0.0,
                                 "is_hash_filename_dst": _is_hash_filename(dst_label),
                                 "is_server_port_outbound": _is_server_port_outbound(dst_node_type, dst_label, op),
@@ -481,11 +536,52 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                                 "is_new_type_for_pair": 0.0 if op_id in pair_types[(src, dst)] else 1.0,
                                 "is_new_src_for_dst": 0.0 if src in dst_unique_srcs[dst] else 1.0,
                                 "write_then_execute_flag": _write_then_execute_flag(op, dst, t, last_write_time),
-                                # --- Group B: continuous path-context features ---
                                 "log_delta_dst_activity": math.log1p((t - last_dst_time.get(dst, t)) / 1e9),
                                 "src_burst_new_pairs": sum(src_recent_new_pairs[src]) / 50.0,
-                                # --- Group C: sequential features ---
                                 "is_execute_from_tmp": 1.0 if op == "EVENT_EXECUTE" and "/tmp/" in dst_label else 0.0,
+                                # --- v2: revised V1 (fixed normalizers) ---
+                                "pair_freq_revised": (
+                                    math.log1p(pair_count[(src, dst)])
+                                    / math.log1p(max(max_pair_count_so_far, 1))
+                                ),
+                                "src_unique_dsts_log": math.log1p(len(src_unique_dsts[src])),
+                                # --- v2 Group A: dst-perspective ---
+                                "dst_unique_srcs_log": math.log1p(len(dst_unique_srcs[dst])),
+                                "dst_op_rarity": 1 - dst_type_count[dst][op_id] / max(_dst_max_tc, 1),
+                                # --- v2 Group B: node-type-aware behavioral ratios ---
+                                "is_network_op": 1.0 if op in _NETWORK_OPS else 0.0,
+                                "src_netflow_ratio": src_netflow_count[src] / max(src_total_count[src], 1),
+                                "src_file_write_ratio": src_file_write_count[src] / max(src_total_count[src], 1),
+                                "src_unique_dst_types": len(dst_types_seen[src]) / 3.0,
+                                # --- v2 Group C: file path semantics ---
+                                "dst_path_depth": (
+                                    (len(dst_label.split("/")) - 1) / 10.0
+                                    if dst_node_type == "file" else 0.0
+                                ),
+                                "is_sensitive_path": (
+                                    _is_sensitive_path_fn(dst_label)
+                                    if dst_node_type == "file" else 0.0
+                                ),
+                                "src_unique_dirs": math.log1p(len(src_dirs[src])),
+                                "is_new_dir_for_src": (
+                                    1.0 if _get_dir_prefix(dst_label) not in src_dirs[src] else 0.0
+                                ) if dst_node_type == "file" else 0.0,
+                                # --- v2 Group F: op transition sequences ---
+                                "prev_op_id_same_pair": (
+                                    (rel2id.get(_prev_op_pair, 0) + 1) / (len(rel2id) + 1)
+                                    if _prev_op_pair is not None else 0.0
+                                ),
+                                "op_transition_rarity": (
+                                    1 - op_transition_count[_transition_key] / max(max_transition_count, 1)
+                                ),
+                                "is_recv_write_pattern": (
+                                    1.0 if _prev_op_src in {"EVENT_RECVFROM", "EVENT_RECVMSG"}
+                                    and op == "EVENT_WRITE" else 0.0
+                                ),
+                                "is_open_then_write": (
+                                    1.0 if _prev_op_pair == "EVENT_OPEN"
+                                    and op == "EVENT_WRITE" else 0.0
+                                ),
                             }
 
                             if feature_names is not None:
@@ -522,6 +618,22 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                             src_recent_new_pairs[src].append(is_new_pair_val)
                             if op == "EVENT_WRITE":
                                 last_write_time[dst] = t
+
+                            # v2 state updates
+                            max_pair_count_so_far = max(max_pair_count_so_far, pair_count[(src, dst)])
+                            dst_type_count[dst][op_id] += 1
+                            src_total_count[src] += 1
+                            if dst_node_type == "netflow":
+                                src_netflow_count[src] += 1
+                            if dst_node_type == "file" and op == "EVENT_WRITE":
+                                src_file_write_count[src] += 1
+                            dst_types_seen[src].add(dst_node_type)
+                            if dst_node_type == "file":
+                                src_dirs[src].add(_get_dir_prefix(dst_label))
+                            op_transition_count[_transition_key] += 1
+                            max_transition_count = max(max_transition_count, op_transition_count[_transition_key])
+                            src_last_op[src] = op
+                            last_op_same_pair[(src, dst)] = op
 
                     # Step 3: Optionally fuse consecutive same-type edges, carry over features
                     if cfg.construction.fuse_edge:

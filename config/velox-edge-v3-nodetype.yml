@@ -1,0 +1,37 @@
+# v3-nodetype: Revised core + Group B (node-type-aware behavioral ratios)
+#
+# V1 features are operation-type-agnostic w.r.t. destination node type.
+# Group B exposes what *kind* of node the source is interacting with and
+# whether the distribution is shifting (e.g., browser doing more network I/O).
+#
+# New over v3-core:
+#   - is_network_op         (binary: this is a network-layer operation)
+#   - src_netflow_ratio     (fraction of this src's edges that target netflow nodes)
+#   - src_file_write_ratio  (fraction of this src's edges that are file WRITEs)
+#   - src_unique_dst_types  (how many distinct node types this src has touched / 3)
+#
+# Primary question: does node-type-aware behavioral shift detection contribute
+# independent signal over the revised temporal/novelty core?
+#
+# Exp IDs: ve_v3_nodetype_cs, ve_v3_nodetype_ca
+
+_include_yml: velox-edge
+
+construction:
+  temporal_features:
+    enabled: True
+    feature_names:
+      - log_delta_same_pair
+      - log_delta_src_activity
+      - pair_freq_revised
+      - src_unique_dsts_log
+      - type_rarity
+      - is_new_pair
+      - is_new_type_for_src
+      - is_network_op
+      - src_netflow_ratio
+      - src_file_write_ratio
+      - src_unique_dst_types
+
+batching:
+  edge_vector_proj_dim: 16

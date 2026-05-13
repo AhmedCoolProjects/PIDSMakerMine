@@ -1,0 +1,52 @@
+# v3-tier1: Full Tier-1 combination (best expected single model)
+#
+# Combines all groups rated Tier 1 (high impact, low implementation risk):
+#   - Revised V1 core (7 features, fixed normalizers + dropped artifacts)
+#   - Group A: dst-perspective (log_delta_dst, dst_unique_srcs_log, dst_op_rarity, is_new_src_for_dst)
+#   - Group B: node-type-aware (is_network_op, src_netflow_ratio, src_file_write_ratio, src_unique_dst_types)
+#   - Group F: op transitions (prev_op_id, op_transition_rarity, is_recv_write, is_open_then_write)
+#   - Bonus binary novelty: is_new_type_for_pair, is_new_path_global
+#
+# Total: 21 features → proj_dim scaled to 32.
+#
+# This is the primary candidate for improvement over all prior configs.
+# If this doesn't improve on v3-core, the issue is model capacity or
+# the training objective, not feature content.
+#
+# Exp IDs: ve_v3_tier1_cs, ve_v3_tier1_ca
+
+_include_yml: velox-edge
+
+construction:
+  temporal_features:
+    enabled: True
+    feature_names:
+      # Revised V1 core
+      - log_delta_same_pair
+      - log_delta_src_activity
+      - pair_freq_revised
+      - src_unique_dsts_log
+      - type_rarity
+      - is_new_pair
+      - is_new_type_for_src
+      # Group A: dst-perspective
+      - log_delta_dst_activity
+      - dst_unique_srcs_log
+      - dst_op_rarity
+      - is_new_src_for_dst
+      # Group B: node-type-aware
+      - is_network_op
+      - src_netflow_ratio
+      - src_file_write_ratio
+      - src_unique_dst_types
+      # Group F: op transitions
+      - prev_op_id_same_pair
+      - op_transition_rarity
+      - is_recv_write_pattern
+      - is_open_then_write
+      # Bonus binary novelty
+      - is_new_type_for_pair
+      - is_new_path_global
+
+batching:
+  edge_vector_proj_dim: 32

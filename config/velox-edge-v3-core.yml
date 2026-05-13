@@ -1,0 +1,34 @@
+# v3-core: Revised 7-feature baseline
+#
+# Removes the three audited-out V1 features:
+#   - t_norm (window-position artifact, likely cause of CA E3 8 TP → 0 TP regression)
+#   - log_delta_prev (global stream noise, duplicated by log_delta_src_activity)
+#   - pair_type_count_norm (near-zero range, redundant with is_new_type_for_src)
+#
+# Revises the two features with e_idx denominator decay:
+#   - pair_freq_revised: log1p(pair_count) / log1p(max_pair_count)
+#   - src_unique_dsts_log: log1p(unique_dsts) — no e_idx denominator
+#
+# Fixes log_delta_same_pair sentinel: new pairs now get log1p(window_size_ns/1e9)
+# instead of 0, making them clearly distinct from "just interacted" pairs.
+#
+# Primary question: does removing t_norm + log_delta_prev recover CA E3 TP?
+#
+# Exp IDs: ve_v3_core_cs, ve_v3_core_ca
+
+_include_yml: velox-edge
+
+construction:
+  temporal_features:
+    enabled: True
+    feature_names:
+      - log_delta_same_pair
+      - log_delta_src_activity
+      - pair_freq_revised
+      - src_unique_dsts_log
+      - type_rarity
+      - is_new_pair
+      - is_new_type_for_src
+
+batching:
+  edge_vector_proj_dim: 16

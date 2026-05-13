@@ -1,0 +1,59 @@
+# v3-tier12: Tier 1 + Tier 2 (adds Group C file path semantics)
+#
+# Extends v3-tier1 with Group C (file path semantics), rated Tier 2
+# (probably useful, but dataset-dependent — Android vs. FreeBSD path sets differ).
+#
+# New over v3-tier1:
+#   - dst_path_depth      (normalized path depth, 0 for non-file edges)
+#   - is_sensitive_path   (binary: access to sensitive system files)
+#   - src_unique_dirs     (log count of distinct directory prefixes touched by src)
+#   - is_new_dir_for_src  (binary: first time src accesses this directory)
+#
+# Total: 25 features → proj_dim 32.
+#
+# Primary question: does adding file path semantics over Tier 1 improve or
+# regress? If regression: node embeddings already encode path semantics and
+# adding explicit path features creates redundancy that hurts the loss landscape.
+#
+# Exp IDs: ve_v3_tier12_cs, ve_v3_tier12_ca
+
+_include_yml: velox-edge
+
+construction:
+  temporal_features:
+    enabled: True
+    feature_names:
+      # Revised V1 core
+      - log_delta_same_pair
+      - log_delta_src_activity
+      - pair_freq_revised
+      - src_unique_dsts_log
+      - type_rarity
+      - is_new_pair
+      - is_new_type_for_src
+      # Group A: dst-perspective
+      - log_delta_dst_activity
+      - dst_unique_srcs_log
+      - dst_op_rarity
+      - is_new_src_for_dst
+      # Group B: node-type-aware
+      - is_network_op
+      - src_netflow_ratio
+      - src_file_write_ratio
+      - src_unique_dst_types
+      # Group F: op transitions
+      - prev_op_id_same_pair
+      - op_transition_rarity
+      - is_recv_write_pattern
+      - is_open_then_write
+      # Bonus binary novelty
+      - is_new_type_for_pair
+      - is_new_path_global
+      # Group C: file path semantics (Tier 2)
+      - dst_path_depth
+      - is_sensitive_path
+      - src_unique_dirs
+      - is_new_dir_for_src
+
+batching:
+  edge_vector_proj_dim: 32

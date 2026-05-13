@@ -1,0 +1,37 @@
+# v3-novelty-ext: Revised core + full binary novelty set
+#
+# Extends v3-core with all binary novelty features (both src and dst perspectives).
+# All features are {0,1} — no continuous normalization that could compress the loss
+# distribution and hide attack edges.
+#
+# New over v3-core:
+#   - is_new_type_for_pair  (new op type between this specific pair)
+#   - is_new_src_for_dst    (first time this src accesses this dst — dst-side novelty)
+#   - is_new_path_global    (dst path never seen by any src in this window)
+#   - is_new_dir_for_src    (first time src accesses this directory prefix)
+#
+# Primary question: is the binary novelty feature set sufficient for both datasets,
+# or do the semantic groups (B, C, F) add necessary signal?
+#
+# Exp IDs: ve_v3_novelty_ext_cs, ve_v3_novelty_ext_ca
+
+_include_yml: velox-edge
+
+construction:
+  temporal_features:
+    enabled: True
+    feature_names:
+      - log_delta_same_pair
+      - log_delta_src_activity
+      - pair_freq_revised
+      - src_unique_dsts_log
+      - type_rarity
+      - is_new_pair
+      - is_new_type_for_src
+      - is_new_type_for_pair
+      - is_new_src_for_dst
+      - is_new_path_global
+      - is_new_dir_for_src
+
+batching:
+  edge_vector_proj_dim: 16
