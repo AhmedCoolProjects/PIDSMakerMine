@@ -165,8 +165,8 @@ def max_metrics(method_to_metrics, metric="adp_score"):
     result = {}
     metric_keys = metrics[0].keys()
     for key in metric_keys:
-        value = metrics[max_idx][key]
-        if include_metric_in_stats(value):
+        value = metrics[max_idx].get(key)
+        if value is not None and include_metric_in_stats(value):
             result[f"{key}_max"] = value
 
     return result
@@ -179,8 +179,8 @@ def min_metrics(method_to_metrics, metric="adp_score"):
     result = {}
     metric_keys = metrics[0].keys()
     for key in metric_keys:
-        value = metrics[min_idx][key]
-        if include_metric_in_stats(value):
+        value = metrics[min_idx].get(key)
+        if value is not None and include_metric_in_stats(value):
             result[f"{key}_min"] = value
 
     return result
