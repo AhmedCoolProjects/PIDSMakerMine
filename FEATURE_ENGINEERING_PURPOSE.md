@@ -66,49 +66,69 @@ default.yml
 
 ## 3. Currently Implemented Features
 
-The 10 features below are implemented in `build_default_graphs.py:399-410`. All are computed **causally**: edges sorted by time, using only information from *before* the current edge.
+All features are implemented in `build_default_graphs.py` (helper functions at lines 180-225, computation loop starting at line 425). All are computed **causally**: edges sorted by time, using only information from *before* the current edge.
+
+**Feature selection** is now config-driven via `feature_names` list in `velox-edge.yml`. `num_features` is auto-derived from `len(feature_names)` when set.
 
 ### State Variables (Maintained Causally)
 
 ```python
-last_time          # previous edge timestamp (any src/dst)
-last_pair_time     # last timestamp per (src, dst)
-last_src_time      # last timestamp per src
-pair_count         # Counter[(src,dst)]
-type_count         # Counter[op_id]
-max_type_count     # max(type_count.values())
-src_uniq_types     # defaultdict(set) — edge types per src
-src_unique_dsts    # defaultdict(set) — unique dsts per src
-pair_types         # defaultdict(set) — edge types per (src,dst)
-normalizer = e_idx # causal — edges seen so far
+# Existing
+last_time              # previous edge timestamp (any src/dst)
+last_pair_time         # last timestamp per (src, dst)
+last_src_time          # last timestamp per src
+pair_count             # Counter[(src,dst)]
+type_count             # Counter[op_id]
+max_type_count         # max(type_count.values())
+src_uniq_types         # defaultdict(set) — edge types per src
+src_unique_dsts        # defaultdict(set) — unique dsts per src
+pair_types             # defaultdict(set) — edge types per (src,dst)
+normalizer = e_idx     # causal — edges seen so far
+
+# New
+last_dst_time          # last timestamp per dst
+dst_unique_srcs        # defaultdict(set) — unique srcs per dst
+seen_dst_labels        # set of dst label strings seen so far
+last_write_time        # last EVENT_WRITE timestamp per dst
+src_recent_new_pairs   # defaultdict(deque(maxlen=50)) — rolling new-pair history per src
 ```
 
-### Feature Table
+### Feature Table — All Available Features
 
-| # | Name | Category | Formula | Range | Purpose |
-|---|------|----------|---------|-------|---------|
-| 0 | `t_norm` | Temporal | `(t - start_time) / window_size_ns` | [0, 1] | Position in time window |
-| 1 | `log_delta_prev` | Temporal | `log1p((t - last_time) / 1e9)` | [0, ~16] | Global inter-arrival (burstiness) |
-| 2 | `log_delta_same_pair` | Temporal | `log1p((t - last_pair_time.get((s,d), t)) / 1e9)` | [0, ~16] | Pair-level inter-arrival |
-| 3 | `log_delta_src_activity` | Temporal | `log1p((t - last_src_time.get(src, t)) / 1e9)` | [0, ~16] | Source idle time (dormancy→burst) |
-| 4 | `pair_freq_causal` | Volumetric | `pair_count[(s,d)] / normalizer` | [0, 1] | How often this pair interacts |
-| 5 | `src_unique_dsts_norm` | Volumetric | `len(src_unique_dsts[src]) / normalizer` | [0, 1] | Source behavioral spread |
-| 6 | `pair_type_count_norm` | Volumetric | `len(pair_types[(s,d)]) / normalizer` | [0, 1] | Relationship type diversity |
-| 7 | `type_rarity` | Novelty | `1 - type_count[op] / max(max_type_count, 1)` | [0, 1] | Rarity of this edge type |
-| 8 | `is_new_pair` | Novelty | `1.0 if (s,d) not in last_pair_time else 0.0` | {0, 1} | First time seeing this pair |
-| 9 | `is_new_type_for_src` | Novelty | `1.0 if op not in src_uniq_types[src] else 0.0` | {0, 1} | First time src uses this edge type |
+| Name | Category | Formula | Range | Grounding |
+|------|----------|---------|-------|-----------|
+| `t_norm` | Temporal | `(t - start_time) / window_size_ns` | [0,1] | Window position |
+| `log_delta_prev` | Temporal | `log1p((t - last_time) / 1e9)` | [0,~16] | Global burstiness |
+| `log_delta_same_pair` | Temporal | `log1p((t - last_pair_time.get((s,d), t)) / 1e9)` | [0,~16] | Pair-level timing |
+| `log_delta_src_activity` | Temporal | `log1p((t - last_src_time.get(src, t)) / 1e9)` | [0,~16] | Source dormancy→burst |
+| `log_delta_dst_activity` | Temporal | `log1p((t - last_dst_time.get(dst, t)) / 1e9)` | [0,~16] | Dest idle time |
+| `pair_freq_causal` | Volumetric | `pair_count[(s,d)] / normalizer` | [0,1] | Pair frequency |
+| `src_unique_dsts_norm` | Volumetric | `len(src_unique_dsts[src]) / normalizer` | [0,1] | Source spread |
+| `pair_type_count_norm` | Volumetric | `len(pair_types[(s,d)]) / normalizer` | [0,1] | Relationship diversity |
+| `src_burst_new_pairs` | Volumetric | `sum(src_recent_new_pairs[src]) / 50.0` | [0,1] | Density of new pairs from src |
+| `type_rarity` | Novelty | `1 - type_count[op] / max(max_type_count,1)` | [0,1] | Edge type rarity |
+| `is_new_pair` | Novelty | `1.0 if (s,d) not in last_pair_time` | {0,1} | First-time pair |
+| `is_new_type_for_src` | Novelty | `1.0 if op not in src_uniq_types[src]` | {0,1} | New op type for src |
+| `is_new_type_for_pair` | Novelty | `1.0 if op not in pair_types[(s,d)]` | {0,1} | New op type for this pair |
+| `is_new_src_for_dst` | Novelty | `1.0 if src not in dst_unique_srcs[dst]` | {0,1} | New src accessing dst |
+| `is_new_path_global` | Novelty | `1.0 if dst_label not in seen_dst_labels` | {0,1} | dst path never seen before |
+| `is_tmp_dst` | Path-based | `1.0 if '/tmp/' in dst_label` | {0,1} | CADETS: malware staging in /tmp |
+| `is_hash_filename_dst` | Path-based | `1.0 if filename ≥32 chars all hex` | {0,1} | CLEARSCOPE: SHA-1 cache entries |
+| `is_server_port_outbound` | Path-based | `1.0 if netflow dst AND local_port ≤ 1024` | {0,1} | CADETS: nginx:80 outbound |
+| `is_execute_from_tmp` | Path-based | `1.0 if EVENT_EXECUTE AND '/tmp/' in dst_label` | {0,1} | Execute from /tmp |
+| `write_then_execute_flag` | Causal | `1.0 if EVENT_EXECUTE AND dst written within 300s` | {0,1} | CADETS: write→execute chain |
 
 ### Edge Vector Assembly
 
 ```python
 edge_vector = torch.cat([
-    src_type_onehot,  # 3 dims (subject, file, netflow)
+    src_type_onehot,  # 3 dims
     dst_type_onehot,  # 3 dims
-    temporal_feats,   # 10 dims (features above)
-], dim=-1)            # Total: 16 raw dimensions
+    temporal_feats,   # len(feature_names) dims — selected by config
+], dim=-1)
 ```
 
-Projected to 32 dims via `lin_edge` before MLP concatenation.
+`num_features` auto-derived from `len(feature_names)` in config; `lin_edge` projects to `edge_vector_proj_dim`.
 
 ---
 
@@ -339,18 +359,17 @@ Start with V2's 8 features, then add/remove systematically:
 
 #### Phase 4: New Features
 
-**Goal**: Implement and test proposed features from taxonomy
+**Goal**: Test the newly implemented features from ground truth analysis
 
-Priority order based on hypothesis strength:
+All features are now implemented in `build_default_graphs.py`. Config files for each variation created. Run with `--force_restart construction` to recompute graphs.
 
-| # | Exp ID | Feature(s) | Category | Rationale | Status |
-|---|--------|------------|----------|-----------|
-| 4.1 | `ve_is_new_type_for_pair` | is_new_type_for_pair | Novelty | First time (src,dst) uses this edge type — browser WRITE then EXECUTE same file | Planned |
-| 4.2 | `ve_is_new_src_for_dst` | is_new_src_for_dst | Novelty | Symmetric — first time dst sees this src | Planned |
-| 4.3 | `ve_pair_dominance` | pair_dominance, dst_exposure | Structural | What fraction of src's activity goes to this dst | Planned |
-| 4.4 | `ve_dst_delta` | log_delta_dst_activity | Temporal | Symmetric to src_delta | Planned |
-| 4.5 | `ve_transition_features` | same_as_prev, transition_validity | Sequential | Unusual operation sequences | Planned |
-| 4.6 | `ve_causal_chains` | causal_chain_length, dst_became_src | Causal | Information flow patterns | Planned |
+| # | Exp ID | Config File | Features | Status |
+|---|--------|-------------|----------|--------|
+| 4.1 | `ve_wte_isolated_ca/cs` | `velox-edge-wte.yml` | is_new_pair + write_then_execute_flag | **Ready** |
+| 4.2 | `ve_binary_only_ca/cs` | `velox-edge-binary-only.yml` | 7 binary features only | **Ready** |
+| 4.3 | `ve_cadets_targeted_ca/cs` | `velox-edge-cadets-targeted.yml` | 7 CADETS-specific features | **Ready** |
+| 4.4 | `ve_clearscope_targeted_ca/cs` | `velox-edge-clearscope-targeted.yml` | 7 CLEARSCOPE-specific features | **Ready** |
+| 4.5 | `ve_v2_plus_binary_ca/cs` | `velox-edge-v2-plus-binary.yml` | V2 core + 4 binary extensions | **Ready** |
 
 ### 6.3 Longer-term Plan
 
@@ -384,6 +403,16 @@ Every feature addition, test, or discard logged here.
 | 2026-05-12 | `type_rarity` | Implemented | — | — | — | — | — | Evaluate | Uses max normalization; helps ranking but may compress |
 | 2026-05-12 | `is_new_pair` | Implemented | — | — | — | — | — | **High priority** | Strongest novelty signal; binary = no normalization |
 | 2026-05-12 | `is_new_type_for_src` | Implemented | — | — | — | — | — | Keep (tentative) | Binary novelty |
+| 2026-05-12 | `is_new_type_for_pair` | Implemented | — | — | — | — | — | **Pending eval** | Binary: first time this (src,dst) uses this op type. CADETS key: nginx→CLONE never done before |
+| 2026-05-12 | `is_new_src_for_dst` | Implemented | — | — | — | — | — | **Pending eval** | Binary: first time src accesses dst. Symmetric to is_new_pair from dst perspective |
+| 2026-05-12 | `is_new_path_global` | Implemented | — | — | — | — | — | **Pending eval** | Binary: dst path never seen in window by ANY src. Stronger than is_new_pair; /tmp/vUgefal is globally new |
+| 2026-05-12 | `is_tmp_dst` | Implemented | — | — | — | — | — | **Pending eval** | Binary path feature. Direct CADETS signal: /tmp writes = malware staging on FreeBSD server |
+| 2026-05-12 | `is_hash_filename_dst` | Implemented | — | — | — | — | — | **Pending eval** | Binary path feature. CLEARSCOPE: 39 of 41 anomalous nodes have 40-char SHA-1 hex names |
+| 2026-05-12 | `is_server_port_outbound` | Implemented | — | — | — | — | — | **Pending eval** | Binary: dst=netflow AND local_port≤1024. CADETS: nginx:80 initiates outbound C2 |
+| 2026-05-12 | `is_execute_from_tmp` | Implemented | — | — | — | — | — | **Pending eval** | Binary: EVENT_EXECUTE from /tmp. Subset of is_tmp_dst, but more specific |
+| 2026-05-12 | `write_then_execute_flag` | Implemented | — | — | — | — | — | **Pending eval** | Binary causal: EVENT_EXECUTE on dst written within 300s. Canonical APT staging pattern |
+| 2026-05-12 | `log_delta_dst_activity` | Implemented | — | — | — | — | — | **Pending eval** | Continuous: symmetric to log_delta_src_activity for dst side |
+| 2026-05-12 | `src_burst_new_pairs` | Implemented | — | — | — | — | — | **Pending eval** | Continuous: rolling density of is_new_pair in last 50 edges from src. CLEARSCOPE: Firefox writes 39 new files in burst |
 | 2026-05-12 | `log_delta_prev2` | Removed | — | — | — | — | — | **Discard** | Redundant with log_delta_prev; removed from uncommitted version |
 | 2026-05-12 | `src_freq_causal` | Removed | — | — | — | — | — | **Discard** | Weak signal; removed in V2 pruning |
 | 2026-05-12 | `src_type_diversity` | Removed | — | — | — | — | — | **Discard** | Normalizes too much, compresses loss; removed in uncommitted version |
@@ -423,22 +452,29 @@ Full experiment history. Use `Exp ID` to reference in W&B or notes.
 
 | Purpose | File | Lines |
 |---------|------|-------|
-| Feature computation | `pidsmaker/preprocessing/build_graph_methods/build_default_graphs.py` | 377-419 |
-| Feature config schema | `pidsmaker/config/config.py` | 815-818 |
+| Helper functions | `pidsmaker/preprocessing/build_graph_methods/build_default_graphs.py` | 180-225 |
+| Feature computation loop | `pidsmaker/preprocessing/build_graph_methods/build_default_graphs.py` | 425-524 |
+| Feature config schema | `pidsmaker/config/config.py` | 815-819 |
 | Edge vector assembly | `pidsmaker/utils/data_utils.py` | 290-299 |
 | Edge vector decoder | `pidsmaker/decoders/custom_edge_mlp_decoder.py` | 7-29 |
-| Factory wiring | `pidsmaker/factory.py` | 287-316, 760-785 |
-| Objective integration | `pidsmaker/objectives/predict_edge_type.py` | All |
+| Feature dim derivation | `pidsmaker/factory.py` | 760-786 |
+| Zero-fill for missing feats | `pidsmaker/tasks/feat_inference.py` | 26-32 |
 | Model forward pass | `pidsmaker/model.py` | 150 |
-| Config | `config/velox-edge.yml` | All |
+| Base config | `config/velox-edge.yml` | All |
+| Variation 1 (binary-only) | `config/velox-edge-binary-only.yml` | All |
+| Variation 2 (CADETS) | `config/velox-edge-cadets-targeted.yml` | All |
+| Variation 3 (CLEARSCOPE) | `config/velox-edge-clearscope-targeted.yml` | All |
+| Variation 4 (V2+binary) | `config/velox-edge-v2-plus-binary.yml` | All |
+| Variation 5 (WTE only) | `config/velox-edge-wte.yml` | All |
 
 ### How to Add a New Feature
 
-1. **Add state variable** (if needed) in `build_default_graphs.py` before the loop
-2. **Add computation** in the feature list (lines 399-410)
-3. **Update `num_features`** in `config/velox-edge.yml`
-4. **Document** in this file's Feature Decision Log
-5. **Run experiment** and log results
+1. **Add state variable** (if needed) before the inner loop in `build_default_graphs.py`
+2. **Add computation** to `all_feat_vals` dict (inside the loop)
+3. **Add state update** at the bottom of the loop (after `e["temporal_feats"] = feats`)
+4. **Add to a config file**: include the name in `feature_names` list; `num_features` auto-derives
+5. **Document** in this file's Feature Decision Log
+6. **Run experiment** with `--force_restart construction` and log results
 
 ### Run Commands
 

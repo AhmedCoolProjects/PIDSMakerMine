@@ -1,0 +1,29 @@
+# Variation 2: CADETS-Targeted Feature Set
+#
+# Every feature maps directly to a specific CADETS E3 attack signature:
+#   is_tmp_dst              → nginx/malware writing to /tmp (staging)
+#   is_server_port_outbound → nginx:80 initiating outbound connections
+#   is_new_type_for_pair    → nginx CLONE when it only ever did READ/WRITE before
+#   write_then_execute_flag → /tmp/malware written then executed (classic APT)
+#   is_execute_from_tmp     → executing binaries from /tmp
+#   is_new_pair             → never-before-seen (src,dst) interaction
+#   t_norm                  → attack timing relative to window start
+#
+# Exp IDs: ve_cadets_targeted_ca, ve_cadets_targeted_cs
+
+_include_yml: velox-edge
+
+construction:
+  temporal_features:
+    enabled: True
+    feature_names:
+      - t_norm
+      - is_new_pair
+      - is_new_type_for_pair
+      - is_tmp_dst
+      - is_server_port_outbound
+      - write_then_execute_flag
+      - is_execute_from_tmp
+
+batching:
+  edge_vector_proj_dim: 16

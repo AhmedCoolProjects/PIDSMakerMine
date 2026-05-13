@@ -814,7 +814,8 @@ TASK_ARGS = {
         ),
         "temporal_features": {
             "enabled": Arg(bool, desc="Whether to compute per-edge temporal features during graph construction."),
-            "num_features": Arg(int, desc="Number of temporal features computed per edge."),
+            "num_features": Arg(int, desc="Number of temporal features computed per edge. Overridden by len(feature_names) when feature_names is set."),
+            "feature_names": Arg(list, desc="Ordered list of feature names to include in the edge vector. When set, num_features is ignored."),
         },
     },
     "transformation": {

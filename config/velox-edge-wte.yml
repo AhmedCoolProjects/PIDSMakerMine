@@ -1,0 +1,22 @@
+# Variation 5: write_then_execute_flag in Isolation
+#
+# The write→execute chain (/tmp/malware written then executed) is the single
+# most CADETS-specific signal in the entire taxonomy. Testing it alone alongside
+# is_new_pair isolates its individual contribution before combining with others.
+#
+# Minimal feature set → minimal compression risk. If this achieves TP > 0 on
+# CADETS, it confirms the causal chain signal is the key missing piece.
+#
+# Exp IDs: ve_wte_isolated_ca, ve_wte_isolated_cs
+
+_include_yml: velox-edge
+
+construction:
+  temporal_features:
+    enabled: True
+    feature_names:
+      - is_new_pair
+      - write_then_execute_flag
+
+batching:
+  edge_vector_proj_dim: 8

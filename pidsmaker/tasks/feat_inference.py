@@ -25,7 +25,11 @@ from pidsmaker.utils.utils import (
 def feat_inference(indexid2vec, etype2oh, ntype2oh, sorted_paths, out_dir, cfg):
     temporal_cfg = cfg.construction.get("temporal_features", {})
     has_temporal = temporal_cfg.get("enabled", False)
-    num_temporal = temporal_cfg.get("num_features", 6)
+    feature_names = temporal_cfg.get("feature_names", None)
+    if feature_names is not None:
+        num_temporal = len(feature_names)
+    else:
+        num_temporal = temporal_cfg.get("num_features", 6)
 
     for path in log_tqdm(sorted_paths, desc="Computing edge embeddings"):
         graph = torch.load(path)

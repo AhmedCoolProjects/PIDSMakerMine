@@ -768,7 +768,11 @@ def get_edge_vector_input_dim(cfg):
     if not temporal_cfg.get("enabled", False):
         return 0
     node_type_dim = cfg.dataset.num_node_types
-    num_temporal = temporal_cfg.get("num_features", 6)
+    feature_names = temporal_cfg.get("feature_names", None)
+    if feature_names is not None:
+        num_temporal = len(feature_names)
+    else:
+        num_temporal = temporal_cfg.get("num_features", 6)
     return node_type_dim * 2 + num_temporal
 
 

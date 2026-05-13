@@ -1,0 +1,29 @@
+# Variation 3: CLEARSCOPE-Targeted Feature Set
+#
+# Targets the CLEARSCOPE E3 Firefox Drakon attack pattern:
+#   is_hash_filename_dst    → 39 anomalous nodes are 40-char SHA-1 hex filenames
+#   is_new_path_global      → each cache entry is globally new (not just new for Firefox)
+#   src_burst_new_pairs     → Firefox writes 39 new files in rapid succession
+#   is_new_pair             → individual new pair novelty
+#   log_delta_src_activity  → Firefox dormancy → burst transition
+#   pair_freq_causal        → these cache entries are rare pairs
+#   t_norm                  → attack timing relative to window start
+#
+# Exp IDs: ve_clearscope_targeted_cs, ve_clearscope_targeted_ca
+
+_include_yml: velox-edge
+
+construction:
+  temporal_features:
+    enabled: True
+    feature_names:
+      - t_norm
+      - log_delta_src_activity
+      - pair_freq_causal
+      - is_new_pair
+      - is_new_path_global
+      - is_hash_filename_dst
+      - src_burst_new_pairs
+
+batching:
+  edge_vector_proj_dim: 16

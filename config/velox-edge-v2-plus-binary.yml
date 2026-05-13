@@ -1,0 +1,28 @@
+# Variation 4: V2 Core + Binary Extensions
+#
+# V2's proven temporal core (t_norm, log_delta_* x3) was the best CLEARSCOPE result
+# (+1500% precision, 94% fewer FPs). Here we extend it with 4 binary novelty features
+# that are symmetric (src+dst perspectives) and include the new CADETS-specific signal.
+#
+# No normalized continuous features beyond V2's proven temporal core — minimal
+# compression risk from the new additions.
+#
+# Exp IDs: ve_v2_plus_binary_cs, ve_v2_plus_binary_ca
+
+_include_yml: velox-edge
+
+construction:
+  temporal_features:
+    enabled: True
+    feature_names:
+      - t_norm
+      - log_delta_prev
+      - log_delta_same_pair
+      - log_delta_src_activity
+      - is_new_pair
+      - is_new_type_for_src
+      - is_new_type_for_pair
+      - is_new_src_for_dst
+
+batching:
+  edge_vector_proj_dim: 32

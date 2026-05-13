@@ -7,7 +7,7 @@ Supports attack mimicry generation for data augmentation.
 
 import math
 import os
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from datetime import datetime, timedelta
 
 import networkx as nx
@@ -175,6 +175,54 @@ def compute_and_save_split2nodes(cfg):
     torch.save(split2nodes, os.path.join(out_dir, "split2nodes.pkl"))
 
     return split2nodes
+
+
+_HEX_CHARS = frozenset("0123456789abcdefABCDEF")
+
+
+def _is_hash_filename(label: str) -> float:
+    """1.0 if the last path segment looks like a hex hash (len >= 32, all hex chars).
+
+    Targets CLEARSCOPE E3: attack cache entries are 40-char SHA-1 hex strings.
+    """
+    if not label:
+        return 0.0
+    filename = label.rstrip("/").rsplit("/", 1)[-1]
+    if len(filename) >= 32 and all(c in _HEX_CHARS for c in filename):
+        return 1.0
+    return 0.0
+
+
+def _is_server_port_outbound(dst_node_type: str, dst_label: str, op: str) -> float:
+    """1.0 if this is an outbound event from a privileged local port (<= 1024).
+
+    Targets CADETS E3: nginx:80 initiating outbound connections is anomalous.
+    Netflow label format: 'local_ip:local_port->remote_ip:remote_port'
+    """
+    if dst_node_type != "netflow" or op not in ("EVENT_CONNECT", "EVENT_SENDTO", "EVENT_SENDMSG"):
+        return 0.0
+    try:
+        arrow_idx = dst_label.find("->")
+        if arrow_idx == -1:
+            return 0.0
+        local_part = dst_label[:arrow_idx]
+        local_port = int(local_part.rsplit(":", 1)[-1])
+        return 1.0 if local_port <= 1024 else 0.0
+    except (ValueError, IndexError):
+        return 0.0
+
+
+def _write_then_execute_flag(op: str, dst, t: int, last_write_time: dict, window_ns: int = 300_000_000_000) -> float:
+    """1.0 if this is EVENT_EXECUTE on a dst that was written to within the last 300s.
+
+    Targets CADETS E3: malware written to /tmp then immediately executed.
+    """
+    if op != "EVENT_EXECUTE":
+        return 0.0
+    last_write = last_write_time.get(dst)
+    if last_write is None:
+        return 0.0
+    return 1.0 if (t - last_write) <= window_ns else 0.0
 
 
 def gen_edge_fused_tw(indexid2msg, cfg):
@@ -379,6 +427,9 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                     if temporal_cfg.get("enabled", False):
                         raw_edges.sort(key=lambda e: e["time"])
                         window_size_ns = max(batch_edges[-1][-2] - start_time, 1)
+                        feature_names = temporal_cfg.get("feature_names", None)
+
+                        # State for existing features
                         last_time = None
                         last_pair_time = {}
                         last_src_time = {}
@@ -388,35 +439,89 @@ def gen_edge_fused_tw(indexid2msg, cfg):
                         src_uniq_types = defaultdict(set)
                         src_unique_dsts = defaultdict(set)
                         pair_types = defaultdict(set)
+
+                        # State for new features
+                        last_dst_time = {}
+                        dst_unique_srcs = defaultdict(set)
+                        seen_dst_labels = set()
+                        last_write_time = {}
+                        src_recent_new_pairs = defaultdict(lambda: deque(maxlen=50))
+
                         for e_idx, e in enumerate(raw_edges):
                             t = e["time"]
                             src, dst = e["src"], e["dst"]
                             op = e["label"]
                             op_id = rel2id.get(op, 0)
                             normalizer = max(e_idx, 1)
+
+                            dst_label = node_info[dst]["label"]
+                            dst_node_type = node_info[dst]["node_type"]
+
                             max_type_count = max(max_type_count, max(type_count.values(), default=0))
                             type_rarity = 1 - (type_count.get(op_id, 0) / max(max_type_count, 1))
-                            feats = [
-                                (t - start_time) / window_size_ns,
-                                math.log1p((t - last_time) / 1e9) if last_time is not None else 0.0,
-                                math.log1p((t - last_pair_time.get((src, dst), t)) / 1e9),
-                                math.log1p((t - last_src_time.get(src, t)) / 1e9),
-                                pair_count[(src, dst)] / normalizer,
-                                len(src_unique_dsts[src]) / normalizer,
-                                len(pair_types[(src, dst)]) / normalizer,
-                                type_rarity,
-                                0.0 if (src, dst) in last_pair_time else 1.0,
-                                0.0 if op_id in src_uniq_types[src] else 1.0,
-                            ]
+                            is_new_pair_val = 0.0 if (src, dst) in last_pair_time else 1.0
+
+                            all_feat_vals = {
+                                # --- existing 10 features ---
+                                "t_norm": (t - start_time) / window_size_ns,
+                                "log_delta_prev": math.log1p((t - last_time) / 1e9) if last_time is not None else 0.0,
+                                "log_delta_same_pair": math.log1p((t - last_pair_time.get((src, dst), t)) / 1e9),
+                                "log_delta_src_activity": math.log1p((t - last_src_time.get(src, t)) / 1e9),
+                                "pair_freq_causal": pair_count[(src, dst)] / normalizer,
+                                "src_unique_dsts_norm": len(src_unique_dsts[src]) / normalizer,
+                                "pair_type_count_norm": len(pair_types[(src, dst)]) / normalizer,
+                                "type_rarity": type_rarity,
+                                "is_new_pair": is_new_pair_val,
+                                "is_new_type_for_src": 0.0 if op_id in src_uniq_types[src] else 1.0,
+                                # --- Group A: binary path/label features ---
+                                "is_tmp_dst": 1.0 if "/tmp/" in dst_label else 0.0,
+                                "is_hash_filename_dst": _is_hash_filename(dst_label),
+                                "is_server_port_outbound": _is_server_port_outbound(dst_node_type, dst_label, op),
+                                "is_new_path_global": 0.0 if dst_label in seen_dst_labels else 1.0,
+                                "is_new_type_for_pair": 0.0 if op_id in pair_types[(src, dst)] else 1.0,
+                                "is_new_src_for_dst": 0.0 if src in dst_unique_srcs[dst] else 1.0,
+                                "write_then_execute_flag": _write_then_execute_flag(op, dst, t, last_write_time),
+                                # --- Group B: continuous path-context features ---
+                                "log_delta_dst_activity": math.log1p((t - last_dst_time.get(dst, t)) / 1e9),
+                                "src_burst_new_pairs": sum(src_recent_new_pairs[src]) / 50.0,
+                                # --- Group C: sequential features ---
+                                "is_execute_from_tmp": 1.0 if op == "EVENT_EXECUTE" and "/tmp/" in dst_label else 0.0,
+                            }
+
+                            if feature_names is not None:
+                                feats = [all_feat_vals[name] for name in feature_names]
+                            else:
+                                # Legacy order: original 10 features
+                                feats = [
+                                    all_feat_vals["t_norm"],
+                                    all_feat_vals["log_delta_prev"],
+                                    all_feat_vals["log_delta_same_pair"],
+                                    all_feat_vals["log_delta_src_activity"],
+                                    all_feat_vals["pair_freq_causal"],
+                                    all_feat_vals["src_unique_dsts_norm"],
+                                    all_feat_vals["pair_type_count_norm"],
+                                    all_feat_vals["type_rarity"],
+                                    all_feat_vals["is_new_pair"],
+                                    all_feat_vals["is_new_type_for_src"],
+                                ]
+
                             e["temporal_feats"] = feats
+
+                            # State updates (always, regardless of feature_names selection)
                             last_time = t
                             last_src_time[src] = t
+                            last_dst_time[dst] = t
                             last_pair_time[(src, dst)] = t
                             pair_count[(src, dst)] += 1
                             type_count[op_id] += 1
                             src_uniq_types[src].add(op_id)
                             src_unique_dsts[src].add(dst)
+                            dst_unique_srcs[dst].add(src)
                             pair_types[(src, dst)].add(op_id)
+                            seen_dst_labels.add(dst_label)
+                            src_recent_new_pairs[src].append(is_new_pair_val)
+                            if op == "EVENT_WRITE":
+                                last_write_time[dst] = t
 
                     # Step 3: Optionally fuse consecutive same-type edges, carry over features
                     if cfg.construction.fuse_edge:
