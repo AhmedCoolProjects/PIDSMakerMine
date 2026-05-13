@@ -9,4 +9,4 @@ experiment:
     deep_ensemble:
       method: increasing_seed
       iterations: 3
-      restart_from: featurization
+      restart_from: training
