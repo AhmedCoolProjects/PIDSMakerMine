@@ -146,11 +146,15 @@ def fuse_hyperparameter_metrics(method_to_metrics):
 
 def avg_std_metrics(method_to_metrics):
     metrics = fuse_hyperparameter_metrics(method_to_metrics)
+    if not metrics:
+        return {}
 
     result = {}
     metric_keys = metrics[0].keys()
     for key in metric_keys:
-        values = [entry[key] for entry in metrics]
+        values = [entry[key] for entry in metrics if key in entry]
+        if not values:
+            continue
         result[f"{key}_mean"] = np.mean(values)
         result[f"{key}_std"] = np.std(values)
         result[f"{key}_std_rel"] = np.std(values) / (np.mean(values) + 1e-12) * 100
@@ -159,7 +163,10 @@ def avg_std_metrics(method_to_metrics):
 
 
 def max_metrics(method_to_metrics, metric="adp_score"):
-    metrics = method_to_metrics[list(method_to_metrics.keys())[0]]
+    all_metrics = method_to_metrics[list(method_to_metrics.keys())[0]]
+    metrics = [m for m in all_metrics if metric in m]
+    if not metrics:
+        return {}
     max_idx = np.argmax([m[metric] for m in metrics])
 
     result = {}
@@ -173,7 +180,10 @@ def max_metrics(method_to_metrics, metric="adp_score"):
 
 
 def min_metrics(method_to_metrics, metric="adp_score"):
-    metrics = method_to_metrics[list(method_to_metrics.keys())[0]]
+    all_metrics = method_to_metrics[list(method_to_metrics.keys())[0]]
+    metrics = [m for m in all_metrics if metric in m]
+    if not metrics:
+        return {}
     min_idx = np.argmin([m[metric] for m in metrics])
 
     result = {}
@@ -197,7 +207,7 @@ def push_best_files_to_wandb(method_to_metrics, cfg):
 
 
 def best_metric_pick_best_run(method_to_metrics):
-    metrics = method_to_metrics["deep_ensemble"]
+    metrics = [m for m in method_to_metrics["deep_ensemble"] if "adp_score" in m]
     adp_scores = np.array([e["adp_score"] for e in metrics])
     max_adp_mask = adp_scores == adp_scores.max()
 
